@@ -24,15 +24,15 @@
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/KeystoneScience/codex-mem.git"
+    "url": "git+https://github.com/KeystoneScience/codex-mem.git"
   },
   "homepage": "https://github.com/KeystoneScience/codex-mem#readme",
   "bugs": {
     "url": "https://github.com/KeystoneScience/codex-mem/issues"
   },
   "bin": {
-    "codex-mem": "./bin/codex-mem.js",
-    "claude-mem": "./bin/codex-mem.js"
+    "codex-mem": "bin/codex-mem.js",
+    "claude-mem": "bin/codex-mem.js"
   },
   "publishConfig": {
     "access": "public"
