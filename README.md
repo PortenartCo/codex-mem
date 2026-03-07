@@ -250,6 +250,23 @@ See the **[Development Guide](https://docs.claude-mem.ai/development)** for buil
 
 ---
 
+## Publishing
+
+The npm package name is `codex-mem-cli`.
+
+For the first npm release of a new package, add an `NPM_TOKEN` repository secret and run the publish workflow on a `v*` tag.
+
+After the package exists on npm, you can switch to npm trusted publishing for `KeystoneScience/codex-mem` and `.github/workflows/npm-publish.yml`, then remove `NPM_TOKEN`.
+
+Manual publish still works:
+
+```bash
+npm adduser
+npm publish --access public --provenance
+```
+
+---
+
 ## Troubleshooting
 
 If experiencing issues, describe the problem to Claude and the troubleshoot skill will automatically diagnose and provide fixes.

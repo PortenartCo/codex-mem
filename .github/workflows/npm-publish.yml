@@ -16,10 +16,26 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+      - run: npm install -g npm@^11.5.1
       - run: npm install --ignore-scripts
       - run: npm run build
-      - run: npm publish --provenance --access public
+      - name: Publish to npm with token auth
+        if: ${{ secrets.NPM_TOKEN != '' }}
+        run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - name: Publish to npm with trusted publishing
+        if: ${{ secrets.NPM_TOKEN == '' }}
+        shell: bash
+        run: |
+          echo "NPM_TOKEN is not configured. Attempting npm trusted publishing via GitHub OIDC."
+          if npm publish --access public; then
+            exit 0
+          fi
+
+          echo "::error::npm publish failed without NPM_TOKEN."
+          echo "::error::For the first publish of a new package, add an NPM_TOKEN repository secret."
+          echo "::error::After the package exists, configure npm trusted publishing for KeystoneScience/codex-mem and this workflow, then you can remove NPM_TOKEN."
+          exit 1
