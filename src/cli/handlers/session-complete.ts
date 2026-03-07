@@ -41,7 +41,12 @@ export const sessionCompleteHandler: EventHandler = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contentSessionId: sessionId
+          contentSessionId: sessionId,
+          platform: input.platform === 'cursor' ? 'cursor' : 'claude',
+          clientKind: input.platform === 'cursor' ? 'cursor' : 'claude-code',
+          captureMode: 'hook',
+          platformSessionId: sessionId,
+          cwd: input.cwd
         })
       });
 

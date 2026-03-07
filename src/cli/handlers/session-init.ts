@@ -53,7 +53,12 @@ export const sessionInitHandler: EventHandler = {
       body: JSON.stringify({
         contentSessionId: sessionId,
         project,
-        prompt
+        prompt,
+        cwd,
+        platform: input.platform === 'cursor' ? 'cursor' : 'claude',
+        clientKind: input.platform === 'cursor' ? 'cursor' : 'claude-code',
+        captureMode: 'hook',
+        platformSessionId: sessionId
       })
       // Note: Removed signal to avoid Windows Bun cleanup issue (libuv assertion)
     });

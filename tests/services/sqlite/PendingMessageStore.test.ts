@@ -28,6 +28,9 @@ describe('PendingMessageStore - Self-Healing claimNextMessage', () => {
       tool_input: { test: 'input' },
       tool_response: { test: 'response' },
       prompt_number: 1,
+      platform: 'claude',
+      client_kind: 'claude-code',
+      capture_mode: 'hook',
       ...overrides,
     };
     return store.enqueue(sessionDbId, CONTENT_SESSION_ID, message);
@@ -142,5 +145,19 @@ describe('PendingMessageStore - Self-Healing claimNextMessage', () => {
     // Session 1's stuck message should still be stuck (not healed by session 2's claim)
     const session1Msg = db.query('SELECT status FROM pending_messages WHERE id = ?').get(stuckInSession1) as { status: string };
     expect(session1Msg.status).toBe('processing');
+  });
+
+  test('preserves source event timestamps for backlog imports', () => {
+    const sourceEventEpoch = 1704067200000;
+    const msgId = enqueueMessage({ source_event_epoch: sourceEventEpoch });
+
+    const stored = db.query('SELECT created_at_epoch FROM pending_messages WHERE id = ?').get(msgId) as {
+      created_at_epoch: number;
+    };
+    expect(stored.created_at_epoch).toBe(sourceEventEpoch);
+
+    const claimed = store.claimNextMessage(sessionDbId);
+    expect(claimed).not.toBeNull();
+    expect(claimed!.created_at_epoch).toBe(sourceEventEpoch);
   });
 });

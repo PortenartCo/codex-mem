@@ -14,6 +14,16 @@ export interface Observation {
   prompt_number: number | null;
   created_at: string;
   created_at_epoch: number;
+  platform?: string;
+  client_kind?: string;
+  capture_mode?: string;
+  capture_fidelity?: string;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface Summary {
@@ -26,6 +36,16 @@ export interface Summary {
   completed?: string;
   next_steps?: string;
   created_at_epoch: number;
+  platform?: string;
+  client_kind?: string;
+  capture_mode?: string;
+  capture_fidelity?: string;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface UserPrompt {
@@ -35,6 +55,15 @@ export interface UserPrompt {
   prompt_number: number;
   prompt_text: string;
   created_at_epoch: number;
+  platform?: string;
+  client_kind?: string;
+  capture_mode?: string;
+  platform_turn_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export type FeedItem =
@@ -52,6 +81,7 @@ export interface StreamEvent {
   summary?: Summary;
   prompt?: UserPrompt;
   isProcessing?: boolean;
+  queueDepth?: number;
 }
 
 export interface Settings {
@@ -88,6 +118,7 @@ export interface Settings {
   // Feature Toggles
   CLAUDE_MEM_CONTEXT_SHOW_LAST_SUMMARY?: string;
   CLAUDE_MEM_CONTEXT_SHOW_LAST_MESSAGE?: string;
+  CLAUDE_MEM_MEMORY_MD_ENABLED?: string;
 }
 
 export interface WorkerStats {

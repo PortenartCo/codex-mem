@@ -1,6 +1,7 @@
 import React from "react";
 import { Summary } from "../types";
 import { formatDate } from "../utils/formatters";
+import { MetadataBadges } from "./MetadataBadges";
 
 interface SummaryCardProps {
   summary: Summary;
@@ -26,6 +27,13 @@ export function SummaryCard({ summary }: SummaryCardProps) {
         {summary.request && (
           <h2 className="summary-title">{summary.request}</h2>
         )}
+        <MetadataBadges
+          platform={summary.platform}
+          clientKind={summary.client_kind}
+          captureMode={summary.capture_mode}
+          gitBranch={summary.git_branch}
+          agentRole={summary.agent_role}
+        />
       </header>
 
       <div className="summary-sections">

@@ -1,6 +1,7 @@
 import React from 'react';
 import { UserPrompt } from '../types';
 import { formatDate } from '../utils/formatters';
+import { MetadataBadges } from './MetadataBadges';
 
 interface PromptCardProps {
   prompt: UserPrompt;
@@ -17,6 +18,13 @@ export function PromptCard({ prompt }: PromptCardProps) {
           <span className="card-project">{prompt.project}</span>
         </div>
       </div>
+      <MetadataBadges
+        platform={prompt.platform}
+        clientKind={prompt.client_kind}
+        captureMode={prompt.capture_mode}
+        gitBranch={prompt.git_branch}
+        agentRole={prompt.agent_role}
+      />
       <div className="card-content">
         {prompt.prompt_text}
       </div>

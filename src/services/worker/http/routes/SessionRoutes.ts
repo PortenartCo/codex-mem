@@ -22,6 +22,9 @@ import { PrivacyCheckValidator } from '../../validation/PrivacyCheckValidator.js
 import { SettingsDefaultsManager } from '../../../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../../../shared/paths.js';
 import { getProcessBySession, ensureProcessExit } from '../../ProcessRegistry.js';
+import { buildNormalizedEvent } from '../../../platform/normalization.js';
+import { getRepoContext } from '../../../platform/repo-context.js';
+import type { NormalizedEvent, SessionMetadata } from '../../../platform/types.js';
 
 export class SessionRoutes extends BaseRouteHandler {
   private completionHandler: SessionCompletionHandler;
@@ -40,7 +43,8 @@ export class SessionRoutes extends BaseRouteHandler {
     super();
     this.completionHandler = new SessionCompletionHandler(
       sessionManager,
-      eventBroadcaster
+      eventBroadcaster,
+      dbManager
     );
   }
 
@@ -307,6 +311,369 @@ export class SessionRoutes extends BaseRouteHandler {
       });
   }
 
+  private buildContentSessionId(metadata: Pick<SessionMetadata, 'platform' | 'clientKind' | 'platformSessionId'>): string {
+    if (metadata.platform === 'claude' && metadata.clientKind === 'claude-code') {
+      return metadata.platformSessionId;
+    }
+
+    return `${metadata.platform}:${metadata.clientKind}:${metadata.platformSessionId}`;
+  }
+
+  private getRequestSessionMetadata(
+    body: Record<string, any>,
+    defaults: Partial<SessionMetadata> = {}
+  ): SessionMetadata {
+    const cwd = typeof body.cwd === 'string' && body.cwd.trim() ? body.cwd : defaults.cwd || null;
+    const repo = cwd ? getRepoContext(cwd) : null;
+
+    const platform = (body.platform || defaults.platform || 'claude') as SessionMetadata['platform'];
+    const clientKind = (
+      body.clientKind ||
+      body.client_kind ||
+      defaults.clientKind ||
+      (platform === 'cursor' ? 'cursor' : 'claude-code')
+    ) as SessionMetadata['clientKind'];
+    const captureMode = (
+      body.captureMode ||
+      body.capture_mode ||
+      defaults.captureMode ||
+      'hook'
+    ) as SessionMetadata['captureMode'];
+    const platformSessionId = String(
+      body.platformSessionId ||
+      body.platform_session_id ||
+      defaults.platformSessionId ||
+      body.contentSessionId ||
+      body.content_session_id
+    );
+
+    return {
+      platform,
+      clientKind,
+      captureMode,
+      platformSessionId,
+      platformTurnId: body.platformTurnId || body.platform_turn_id || defaults.platformTurnId || null,
+      itemId: body.itemId || body.item_id || defaults.itemId || null,
+      parentSessionId: body.parentSessionId || body.parent_session_id || defaults.parentSessionId || null,
+      agentRole: body.agentRole || body.agent_role || defaults.agentRole || null,
+      cwd,
+      project: body.project || defaults.project || repo?.project || 'unknown',
+      repoRoot: body.repoRoot || body.repo_root || defaults.repoRoot || repo?.repoRoot || null,
+      repoId: body.repoId || body.repo_id || defaults.repoId || repo?.repoId || null,
+      gitBranch: body.gitBranch || body.git_branch || defaults.gitBranch || repo?.gitBranch || null,
+      gitCommit: body.gitCommit || body.git_commit || defaults.gitCommit || repo?.gitCommit || null
+    };
+  }
+
+  private sanitizeText(text: string | null | undefined): string | null {
+    if (!text) return null;
+
+    const cleaned = stripMemoryTagsFromPrompt(text);
+    return cleaned && cleaned.trim() ? cleaned : null;
+  }
+
+  private sanitizeStructuredPayload(payload: unknown): unknown {
+    if (payload === undefined || payload === null) {
+      return undefined;
+    }
+
+    if (typeof payload === 'string') {
+      return this.sanitizeText(payload) || payload;
+    }
+
+    try {
+      const cleaned = stripMemoryTagsFromJson(JSON.stringify(payload));
+      return JSON.parse(cleaned);
+    } catch {
+      return payload;
+    }
+  }
+
+  private broadcastLatestPrompt(contentSessionId: string): void {
+    const latestPrompt = this.dbManager.getSessionStore().getLatestUserPrompt(contentSessionId);
+    if (!latestPrompt) return;
+
+    this.eventBroadcaster.broadcastNewPrompt({
+      id: latestPrompt.id,
+      content_session_id: latestPrompt.content_session_id,
+      project: latestPrompt.project,
+      prompt_number: latestPrompt.prompt_number,
+      prompt_text: latestPrompt.prompt_text,
+      created_at_epoch: latestPrompt.created_at_epoch
+    });
+
+    const chromaSync = this.dbManager.getChromaSync();
+    if (!chromaSync) return;
+
+    const chromaStart = Date.now();
+    const promptText = latestPrompt.prompt_text;
+    chromaSync.syncUserPrompt(
+      latestPrompt.id,
+      latestPrompt.memory_session_id,
+      latestPrompt.project,
+      promptText,
+      latestPrompt.prompt_number,
+      latestPrompt.created_at_epoch
+    ).then(() => {
+      logger.debug('CHROMA', 'User prompt synced', {
+        promptId: latestPrompt.id,
+        duration: `${Date.now() - chromaStart}ms`
+      });
+    }).catch((error) => {
+      logger.error('CHROMA', 'User prompt sync failed, continuing without vector search', {
+        promptId: latestPrompt.id
+      }, error);
+    });
+  }
+
+  private coerceNormalizedEvent(input: any): NormalizedEvent {
+    if (input && typeof input === 'object' && input.id && input.payloadJson && input.payloadHash) {
+      return input as NormalizedEvent;
+    }
+
+    const repo = getRepoContext(input?.cwd || process.cwd());
+    const platform = input?.platform || 'manual';
+    const clientKind = input?.clientKind || input?.client_kind || 'unknown';
+    const captureMode = input?.captureMode || input?.capture_mode || 'manual';
+    const platformSessionId = String(input?.platformSessionId || input?.platform_session_id || input?.contentSessionId || input?.content_session_id || `session-${Date.now()}`);
+
+    return buildNormalizedEvent({
+      platform,
+      clientKind,
+      captureMode,
+      platformSessionId,
+      platformTurnId: input?.platformTurnId || input?.platform_turn_id || null,
+      itemId: input?.itemId || input?.item_id || null,
+      parentSessionId: input?.parentSessionId || input?.parent_session_id || null,
+      agentRole: input?.agentRole || input?.agent_role || null,
+      cwd: input?.cwd || repo.cwd,
+      project: input?.project || repo.project,
+      repoRoot: input?.repoRoot || input?.repo_root || repo.repoRoot,
+      repoId: input?.repoId || input?.repo_id || repo.repoId,
+      gitBranch: input?.gitBranch || input?.git_branch || repo.gitBranch,
+      gitCommit: input?.gitCommit || input?.git_commit || repo.gitCommit,
+      eventType: input?.eventType || input?.event_type || 'tool.output',
+      createdAtEpochMs: Number(input?.createdAtEpochMs || input?.created_at_epoch_ms || input?.created_at_epoch || Date.now()),
+      privacyState: input?.privacyState || input?.privacy_state || 'normal',
+      sourceConfidence: input?.sourceConfidence || input?.source_confidence || 'low',
+      captureFidelity: input?.captureFidelity || input?.capture_fidelity || 'low',
+      promptText: input?.promptText || input?.prompt_text || null,
+      assistantText: input?.assistantText || input?.assistant_text || null,
+      summaryText: input?.summaryText || input?.summary_text || null,
+      toolName: input?.toolName || input?.tool_name || null,
+      toolInput: input?.toolInput ?? input?.tool_input,
+      toolOutput: input?.toolOutput ?? input?.tool_output,
+      payload: input?.payload ?? input
+    });
+  }
+
+  private shouldQueueObservationEvent(event: NormalizedEvent): boolean {
+    if (event.eventType === 'tool.output') {
+      return true;
+    }
+
+    if (event.eventType === 'approval.requested' || event.eventType === 'approval.resolved') {
+      return true;
+    }
+
+    if (!['command.execution', 'file.change', 'web.search', 'context.compacted'].includes(event.eventType)) {
+      return false;
+    }
+
+    return Boolean(event.toolOutput ?? event.assistantText ?? event.summaryText);
+  }
+
+  private recordCompatibilityEvent(event: NormalizedEvent, sessionDbId: number): number {
+    const result = this.dbManager.getSessionStore().storeRawEvent(event, sessionDbId);
+    return result.id;
+  }
+
+  private ingestNormalizedEvents(events: NormalizedEvent[]): Array<{
+    eventId: string;
+    eventType: string;
+    contentSessionId: string;
+    sessionDbId: number;
+    rawEventId: number;
+    inserted: boolean;
+  }> {
+    const store = this.dbManager.getSessionStore();
+    const eventTypeRank: Record<string, number> = {
+      'session.started': 0,
+      'prompt.submitted': 1,
+      'tool.used': 2,
+      'tool.output': 3,
+      'command.execution': 3,
+      'file.change': 3,
+      'web.search': 3,
+      'approval.requested': 3,
+      'approval.resolved': 3,
+      'context.compacted': 3,
+      'turn.completed': 4,
+      'session.completed': 5
+    };
+    const results: Array<{
+      eventId: string;
+      eventType: string;
+      contentSessionId: string;
+      sessionDbId: number;
+      rawEventId: number;
+      inserted: boolean;
+    }> = [];
+
+    const ordered = [...events].sort((left, right) => {
+      if (left.createdAtEpochMs !== right.createdAtEpochMs) {
+        return left.createdAtEpochMs - right.createdAtEpochMs;
+      }
+      return (eventTypeRank[left.eventType] ?? 99) - (eventTypeRank[right.eventType] ?? 99);
+    });
+
+    for (const event of ordered) {
+      const contentSessionId = this.buildContentSessionId(event);
+      const project = event.project || 'unknown';
+      const seedPrompt = this.sanitizeText(event.promptText || event.summaryText || '') || '';
+      const sessionDbId = store.createSDKSession(
+        contentSessionId,
+        project,
+        seedPrompt,
+        undefined,
+        event,
+        event.createdAtEpochMs
+      );
+      const rawEvent = store.storeRawEvent(event, sessionDbId);
+
+      results.push({
+        eventId: event.id,
+        eventType: event.eventType,
+        contentSessionId,
+        sessionDbId,
+        rawEventId: rawEvent.id,
+        inserted: rawEvent.inserted
+      });
+
+      if (!rawEvent.inserted) {
+        if (event.eventType === 'session.completed') {
+          store.markSessionCompleted(sessionDbId, event.createdAtEpochMs);
+        }
+        continue;
+      }
+
+      if (event.eventType === 'session.started') {
+        this.eventBroadcaster.broadcastSessionStarted(sessionDbId, project);
+        continue;
+      }
+
+      if (event.eventType === 'prompt.submitted') {
+        const cleanedPrompt = this.sanitizeText(event.promptText || '');
+        if (!cleanedPrompt) {
+          continue;
+        }
+
+        const promptNumber = store.getPromptNumberFromUserPrompts(contentSessionId) + 1;
+        store.saveUserPrompt(
+          contentSessionId,
+          promptNumber,
+          cleanedPrompt,
+          {
+            ...event,
+            rawEventId: rawEvent.id
+          },
+          event.createdAtEpochMs
+        );
+        this.sessionManager.initializeSession(sessionDbId, cleanedPrompt, promptNumber);
+        this.broadcastLatestPrompt(contentSessionId);
+        continue;
+      }
+
+      if (this.shouldQueueObservationEvent(event)) {
+        const promptNumber = store.getPromptNumberFromUserPrompts(contentSessionId);
+        if (promptNumber < 1) {
+          logger.debug('SESSION', 'Skipping observation event without visible prompt', {
+            sessionDbId,
+            contentSessionId,
+            eventType: event.eventType
+          });
+          continue;
+        }
+
+        const userPrompt = PrivacyCheckValidator.checkUserPromptPrivacy(
+          store,
+          contentSessionId,
+          promptNumber,
+          'observation',
+          sessionDbId,
+          { eventType: event.eventType, tool_name: event.toolName }
+        );
+        if (!userPrompt) {
+          continue;
+        }
+
+        this.sessionManager.queueObservation(sessionDbId, {
+          tool_name: event.toolName || event.eventType,
+          tool_input: this.sanitizeStructuredPayload(event.toolInput),
+          tool_response: this.sanitizeStructuredPayload(
+            event.toolOutput ?? event.assistantText ?? event.summaryText
+          ),
+          prompt_number: promptNumber,
+          cwd: event.cwd || event.repoRoot || undefined,
+          raw_event_id: rawEvent.id,
+          platform: event.platform,
+          client_kind: event.clientKind,
+          capture_mode: event.captureMode,
+          platform_turn_id: event.platformTurnId || undefined,
+          repo_root: event.repoRoot || undefined,
+          repo_id: event.repoId || undefined,
+          git_branch: event.gitBranch || undefined,
+          git_commit: event.gitCommit || undefined,
+          parent_session_id: event.parentSessionId || undefined,
+          agent_role: event.agentRole || undefined,
+          source_event_epoch: event.createdAtEpochMs
+        });
+        this.ensureGeneratorRunning(sessionDbId, `event:${event.eventType}`);
+        this.eventBroadcaster.broadcastObservationQueued(sessionDbId);
+        continue;
+      }
+
+      if (event.eventType === 'turn.completed') {
+        const promptNumber = store.getPromptNumberFromUserPrompts(contentSessionId);
+        if (promptNumber < 1) {
+          logger.debug('SESSION', 'Skipping summarize event without visible prompt', {
+            sessionDbId,
+            contentSessionId
+          });
+          continue;
+        }
+
+        const userPrompt = PrivacyCheckValidator.checkUserPromptPrivacy(
+          store,
+          contentSessionId,
+          promptNumber,
+          'summarize',
+          sessionDbId
+        );
+        if (!userPrompt) {
+          continue;
+        }
+
+        this.sessionManager.initializeSession(sessionDbId);
+        this.sessionManager.queueSummarize(
+          sessionDbId,
+          this.sanitizeText(event.assistantText || event.summaryText || '') || undefined,
+          event.createdAtEpochMs
+        );
+        this.ensureGeneratorRunning(sessionDbId, `event:${event.eventType}`);
+        this.eventBroadcaster.broadcastSummarizeQueued();
+        continue;
+      }
+
+      if (event.eventType === 'session.completed') {
+        store.markSessionCompleted(sessionDbId, event.createdAtEpochMs);
+        this.eventBroadcaster.broadcastSessionCompleted(sessionDbId);
+      }
+    }
+
+    return results;
+  }
+
   setupRoutes(app: express.Application): void {
     // Legacy session endpoints (use sessionDbId)
     app.post('/sessions/:sessionDbId/init', this.handleSessionInit.bind(this));
@@ -321,6 +688,13 @@ export class SessionRoutes extends BaseRouteHandler {
     app.post('/api/sessions/observations', this.handleObservationsByClaudeId.bind(this));
     app.post('/api/sessions/summarize', this.handleSummarizeByClaudeId.bind(this));
     app.post('/api/sessions/complete', this.handleCompleteByClaudeId.bind(this));
+
+    // Generic event-sourced ingress
+    app.post('/api/events/ingest', this.handleEventIngest.bind(this));
+    app.post('/api/events/batch', this.handleEventBatch.bind(this));
+    app.get('/api/events', this.handleGetEvents.bind(this));
+    app.get('/api/replay/:platformSessionId', this.handleReplay.bind(this));
+    app.get('/api/session-graph/:platformSessionId', this.handleSessionGraph.bind(this));
   }
 
   /**
@@ -354,31 +728,34 @@ export class SessionRoutes extends BaseRouteHandler {
       });
 
       // Sync user prompt to Chroma
-      const chromaStart = Date.now();
-      const promptText = latestPrompt.prompt_text;
-      this.dbManager.getChromaSync().syncUserPrompt(
-        latestPrompt.id,
-        latestPrompt.memory_session_id,
-        latestPrompt.project,
-        promptText,
-        latestPrompt.prompt_number,
-        latestPrompt.created_at_epoch
-      ).then(() => {
-        const chromaDuration = Date.now() - chromaStart;
-        const truncatedPrompt = promptText.length > 60
-          ? promptText.substring(0, 60) + '...'
-          : promptText;
-        logger.debug('CHROMA', 'User prompt synced', {
-          promptId: latestPrompt.id,
-          duration: `${chromaDuration}ms`,
-          prompt: truncatedPrompt
+      const chromaSync = this.dbManager.getChromaSync();
+      if (chromaSync) {
+        const chromaStart = Date.now();
+        const promptText = latestPrompt.prompt_text;
+        chromaSync.syncUserPrompt(
+          latestPrompt.id,
+          latestPrompt.memory_session_id,
+          latestPrompt.project,
+          promptText,
+          latestPrompt.prompt_number,
+          latestPrompt.created_at_epoch
+        ).then(() => {
+          const chromaDuration = Date.now() - chromaStart;
+          const truncatedPrompt = promptText.length > 60
+            ? promptText.substring(0, 60) + '...'
+            : promptText;
+          logger.debug('CHROMA', 'User prompt synced', {
+            promptId: latestPrompt.id,
+            duration: `${chromaDuration}ms`,
+            prompt: truncatedPrompt
+          });
+        }).catch((error) => {
+          logger.error('CHROMA', 'User prompt sync failed, continuing without vector search', {
+            promptId: latestPrompt.id,
+            prompt: promptText.length > 60 ? promptText.substring(0, 60) + '...' : promptText
+          }, error);
         });
-      }).catch((error) => {
-        logger.error('CHROMA', 'User prompt sync failed, continuing without vector search', {
-          promptId: latestPrompt.id,
-          prompt: promptText.length > 60 ? promptText.substring(0, 60) + '...' : promptText
-        }, error);
-      });
+      }
     }
 
     // Idempotent: ensure generator is running (matches handleObservations / handleSummarize)
@@ -485,7 +862,7 @@ export class SessionRoutes extends BaseRouteHandler {
     const sessionDbId = this.parseIntParam(req, res, 'sessionDbId');
     if (sessionDbId === null) return;
 
-    await this.completionHandler.completeByDbId(sessionDbId);
+    await this.completionHandler.completeByDbId(sessionDbId, Date.now());
 
     res.json({ success: true });
   });
@@ -529,9 +906,15 @@ export class SessionRoutes extends BaseRouteHandler {
 
     try {
       const store = this.dbManager.getSessionStore();
+      const metadata = this.getRequestSessionMetadata(req.body, {
+        platform: req.body.platform === 'cursor' ? 'cursor' : 'claude',
+        clientKind: req.body.platform === 'cursor' ? 'cursor' : 'claude-code',
+        captureMode: 'hook',
+        platformSessionId: contentSessionId
+      });
 
       // Get or create session
-      const sessionDbId = store.createSDKSession(contentSessionId, '', '');
+      const sessionDbId = store.createSDKSession(contentSessionId, '', '', undefined, metadata);
       const promptNumber = store.getPromptNumberFromUserPrompts(contentSessionId);
 
       // Privacy check: skip if user prompt was entirely private
@@ -558,11 +941,40 @@ export class SessionRoutes extends BaseRouteHandler {
         : '{}';
 
       // Queue observation
+      const rawEventId = this.recordCompatibilityEvent(
+        buildNormalizedEvent({
+          ...metadata,
+          eventType: 'tool.output',
+          createdAtEpochMs: Date.now(),
+          privacyState: 'normal',
+          sourceConfidence: 'high',
+          captureFidelity: 'high',
+          toolName: tool_name,
+          toolInput: this.sanitizeStructuredPayload(tool_input),
+          toolOutput: this.sanitizeStructuredPayload(tool_response),
+          summaryText: this.sanitizeText(typeof tool_response === 'string' ? tool_response : null),
+          payload: req.body
+        }),
+        sessionDbId
+      );
+
       this.sessionManager.queueObservation(sessionDbId, {
         tool_name,
         tool_input: cleanedToolInput,
         tool_response: cleanedToolResponse,
         prompt_number: promptNumber,
+        raw_event_id: rawEventId,
+        platform: metadata.platform,
+        client_kind: metadata.clientKind,
+        capture_mode: metadata.captureMode,
+        platform_turn_id: metadata.platformTurnId || undefined,
+        repo_root: metadata.repoRoot || undefined,
+        repo_id: metadata.repoId || undefined,
+        git_branch: metadata.gitBranch || undefined,
+        git_commit: metadata.gitCommit || undefined,
+        parent_session_id: metadata.parentSessionId || undefined,
+        agent_role: metadata.agentRole || undefined,
+        source_event_epoch: Date.now(),
         cwd: cwd || (() => {
           logger.error('SESSION', 'Missing cwd when queueing observation in SessionRoutes', {
             sessionId: sessionDbId,
@@ -601,9 +1013,15 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     const store = this.dbManager.getSessionStore();
+    const metadata = this.getRequestSessionMetadata(req.body, {
+      platform: 'claude',
+      clientKind: 'claude-code',
+      captureMode: 'hook',
+      platformSessionId: contentSessionId
+    });
 
     // Get or create session
-    const sessionDbId = store.createSDKSession(contentSessionId, '', '');
+    const sessionDbId = store.createSDKSession(contentSessionId, '', '', undefined, metadata);
     const promptNumber = store.getPromptNumberFromUserPrompts(contentSessionId);
 
     // Privacy check: skip if user prompt was entirely private
@@ -620,7 +1038,23 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     // Queue summarize
-    this.sessionManager.queueSummarize(sessionDbId, last_assistant_message);
+    const cleanedAssistantMessage = this.sanitizeText(last_assistant_message) || undefined;
+    this.recordCompatibilityEvent(
+      buildNormalizedEvent({
+        ...metadata,
+        eventType: 'turn.completed',
+        createdAtEpochMs: Date.now(),
+        privacyState: 'normal',
+        sourceConfidence: 'high',
+        captureFidelity: 'medium',
+        assistantText: cleanedAssistantMessage || null,
+        summaryText: cleanedAssistantMessage || null,
+        payload: req.body
+      }),
+      sessionDbId
+    );
+    this.sessionManager.initializeSession(sessionDbId);
+    this.sessionManager.queueSummarize(sessionDbId, cleanedAssistantMessage, Date.now());
 
     // Ensure SDK agent is running
     this.ensureGeneratorRunning(sessionDbId, 'summarize');
@@ -651,25 +1085,47 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     const store = this.dbManager.getSessionStore();
+    const metadata = this.getRequestSessionMetadata(req.body, {
+      platform: 'claude',
+      clientKind: 'claude-code',
+      captureMode: 'hook',
+      platformSessionId: contentSessionId
+    });
 
     // Look up sessionDbId from contentSessionId (createSDKSession is idempotent)
     // Pass empty strings - we only need the ID lookup, not to create a new session
-    const sessionDbId = store.createSDKSession(contentSessionId, '', '');
+    const sessionDbId = store.createSDKSession(contentSessionId, '', '', undefined, metadata);
+    const completedAtEpoch = Date.now();
+    const completeEventId = this.recordCompatibilityEvent(
+      buildNormalizedEvent({
+        ...metadata,
+        eventType: 'session.completed',
+        createdAtEpochMs: completedAtEpoch,
+        privacyState: 'normal',
+        sourceConfidence: 'high',
+        captureFidelity: 'medium',
+        summaryText: 'Session completed',
+        payload: req.body
+      }),
+      sessionDbId
+    );
 
     // Check if session is in the active sessions map
     const activeSession = this.sessionManager.getSession(sessionDbId);
     if (!activeSession) {
-      // Session may not be in memory (already completed or never initialized)
+      store.markSessionCompleted(sessionDbId, completedAtEpoch);
       logger.debug('SESSION', 'session-complete: Session not in active map', {
         contentSessionId,
-        sessionDbId
+        sessionDbId,
+        rawEventId: completeEventId
       });
-      res.json({ status: 'skipped', reason: 'not_active' });
+      this.eventBroadcaster.broadcastSessionCompleted(sessionDbId);
+      res.json({ status: 'completed', sessionDbId, active: false });
       return;
     }
 
     // Complete the session (removes from active sessions map)
-    await this.completionHandler.completeByDbId(sessionDbId);
+    await this.completionHandler.completeByDbId(sessionDbId, completedAtEpoch);
 
     logger.info('SESSION', 'Session completed via API', {
       contentSessionId,
@@ -713,9 +1169,16 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     const store = this.dbManager.getSessionStore();
+    const metadata = this.getRequestSessionMetadata(req.body, {
+      platform: req.body.platform === 'cursor' ? 'cursor' : 'claude',
+      clientKind: req.body.platform === 'cursor' ? 'cursor' : 'claude-code',
+      captureMode: 'hook',
+      platformSessionId: contentSessionId,
+      project
+    });
 
     // Step 1: Create/get SDK session (idempotent INSERT OR IGNORE)
-    const sessionDbId = store.createSDKSession(contentSessionId, project, prompt, customTitle);
+    const sessionDbId = store.createSDKSession(contentSessionId, project, prompt, customTitle, metadata);
 
     // Verify session creation with DB lookup
     const dbSession = store.getSessionById(sessionDbId);
@@ -757,11 +1220,32 @@ export class SessionRoutes extends BaseRouteHandler {
     }
 
     // Step 5: Save cleaned user prompt
-    store.saveUserPrompt(contentSessionId, promptNumber, cleanedPrompt);
+    const rawEventId = this.recordCompatibilityEvent(
+      buildNormalizedEvent({
+        ...metadata,
+        eventType: 'prompt.submitted',
+        createdAtEpochMs: Date.now(),
+        privacyState: 'normal',
+        sourceConfidence: 'high',
+        captureFidelity: 'high',
+        promptText: cleanedPrompt,
+        summaryText: cleanedPrompt,
+        payload: req.body
+      }),
+      sessionDbId
+    );
+    store.saveUserPrompt(contentSessionId, promptNumber, cleanedPrompt, {
+      ...metadata,
+      rawEventId
+    });
 
     // Step 6: Check if SDK agent is already running for this session (#1079)
     // If contextInjected is true, the hook should skip re-initializing the SDK agent
     const contextInjected = this.sessionManager.getSession(sessionDbId) !== undefined;
+    if (contextInjected) {
+      this.sessionManager.initializeSession(sessionDbId, cleanedPrompt, promptNumber);
+      this.broadcastLatestPrompt(contentSessionId);
+    }
 
     // Debug-level log since CREATED already logged the key info
     logger.debug('SESSION', 'User prompt saved', {
@@ -775,6 +1259,128 @@ export class SessionRoutes extends BaseRouteHandler {
       promptNumber,
       skipped: false,
       contextInjected
+    });
+  });
+
+  private handleEventIngest = this.wrapHandler((req: Request, res: Response): void => {
+    const event = req.body?.event ?? req.body;
+    if (!event) {
+      this.badRequest(res, 'Missing event payload');
+      return;
+    }
+
+    const results = this.ingestNormalizedEvents([this.coerceNormalizedEvent(event)]);
+    res.json({ ingested: results.length, events: results });
+  });
+
+  private handleEventBatch = this.wrapHandler((req: Request, res: Response): void => {
+    const input = Array.isArray(req.body) ? req.body : req.body?.events;
+    if (!Array.isArray(input) || input.length === 0) {
+      this.badRequest(res, 'Missing events array');
+      return;
+    }
+
+    const results = this.ingestNormalizedEvents(input.map((event: any) => this.coerceNormalizedEvent(event)));
+    res.json({
+      ingested: results.filter(result => result.inserted).length,
+      total: results.length,
+      events: results
+    });
+  });
+
+  private handleGetEvents = this.wrapHandler((req: Request, res: Response): void => {
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : undefined;
+    const offset = typeof req.query.offset === 'string' ? parseInt(req.query.offset, 10) : undefined;
+    const events = this.dbManager.getSessionStore().listRawEvents({
+      platformSessionId: typeof req.query.platformSessionId === 'string' ? req.query.platformSessionId : undefined,
+      platform: typeof req.query.platform === 'string' ? req.query.platform : undefined,
+      eventType: typeof req.query.eventType === 'string' ? req.query.eventType : undefined,
+      repoId: typeof req.query.repoId === 'string' ? req.query.repoId : undefined,
+      limit: Number.isFinite(limit) ? limit : undefined,
+      offset: Number.isFinite(offset) ? offset : undefined
+    });
+
+    res.json({ events });
+  });
+
+  private handleReplay = this.wrapHandler((req: Request, res: Response): void => {
+    const { platformSessionId } = req.params;
+    if (!platformSessionId) {
+      this.badRequest(res, 'Missing platformSessionId');
+      return;
+    }
+
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 200;
+    const safeLimit = Number.isFinite(limit) ? limit : 200;
+    const store = this.dbManager.getSessionStore();
+    const events = store.getRawEventReplay(platformSessionId, safeLimit).slice().reverse();
+    const session = store.db.prepare(`
+      SELECT *
+      FROM sdk_sessions
+      WHERE platform_session_id = ?
+      ORDER BY started_at_epoch DESC
+      LIMIT 1
+    `).get(platformSessionId) as Record<string, any> | undefined;
+
+    res.json({
+      platformSessionId,
+      session: session || null,
+      events
+    });
+  });
+
+  private handleSessionGraph = this.wrapHandler((req: Request, res: Response): void => {
+    const { platformSessionId } = req.params;
+    if (!platformSessionId) {
+      this.badRequest(res, 'Missing platformSessionId');
+      return;
+    }
+
+    const store = this.dbManager.getSessionStore();
+    const baseSession = store.db.prepare(`
+      SELECT *
+      FROM sdk_sessions
+      WHERE platform_session_id = ?
+      ORDER BY started_at_epoch DESC
+      LIMIT 1
+    `).get(platformSessionId) as Record<string, any> | undefined;
+    const baseEvent = store.db.prepare(`
+      SELECT platform_session_id, parent_session_id
+      FROM raw_events
+      WHERE platform_session_id = ? OR parent_session_id = ?
+      ORDER BY created_at_epoch ASC
+      LIMIT 1
+    `).get(platformSessionId, platformSessionId) as { platform_session_id: string; parent_session_id: string | null } | undefined;
+
+    const rootPlatformSessionId =
+      baseSession?.parent_session_id ||
+      baseEvent?.parent_session_id ||
+      platformSessionId;
+
+    const sessions = store.db.prepare(`
+      SELECT id, content_session_id, memory_session_id, project, status,
+             platform, client_kind, capture_mode, platform_session_id, parent_session_id,
+             agent_role, repo_root, repo_id, git_branch, git_commit,
+             started_at, started_at_epoch, completed_at, completed_at_epoch
+      FROM sdk_sessions
+      WHERE platform_session_id = ?
+         OR parent_session_id = ?
+         OR platform_session_id = ?
+      ORDER BY started_at_epoch ASC, id ASC
+    `).all(rootPlatformSessionId, rootPlatformSessionId, platformSessionId) as Array<Record<string, any>>;
+
+    const edges = sessions
+      .filter(session => session.parent_session_id)
+      .map(session => ({
+        parentSessionId: session.parent_session_id,
+        childSessionId: session.platform_session_id,
+        agentRole: session.agent_role || null
+      }));
+
+    res.json({
+      rootPlatformSessionId,
+      sessions,
+      edges
     });
   });
 }

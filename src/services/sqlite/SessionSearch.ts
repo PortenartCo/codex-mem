@@ -186,8 +186,30 @@ export class SessionSearch {
   ): string {
     const conditions: string[] = [];
 
-    // Project filter
-    if (filters.project) {
+    // Repo-aware scoping with graceful fallback for older rows.
+    if (filters.repoId) {
+      const repoIdentityClauses = [`${tableAlias}.repo_id = ?`];
+      params.push(filters.repoId);
+
+      if (filters.repoRoot) {
+        repoIdentityClauses.push(`(${tableAlias}.repo_id IS NULL AND ${tableAlias}.repo_root = ?)`);
+        params.push(filters.repoRoot);
+      }
+      if (filters.project) {
+        repoIdentityClauses.push(`(${tableAlias}.repo_id IS NULL AND ${tableAlias}.repo_root IS NULL AND ${tableAlias}.project = ?)`);
+        params.push(filters.project);
+      }
+
+      conditions.push(`(${repoIdentityClauses.join(' OR ')})`);
+    } else if (filters.repoRoot) {
+      if (filters.project) {
+        conditions.push(`(${tableAlias}.repo_root = ? OR (${tableAlias}.repo_root IS NULL AND ${tableAlias}.project = ?))`);
+        params.push(filters.repoRoot, filters.project);
+      } else {
+        conditions.push(`${tableAlias}.repo_root = ?`);
+        params.push(filters.repoRoot);
+      }
+    } else if (filters.project) {
       conditions.push(`${tableAlias}.project = ?`);
       params.push(filters.project);
     }
@@ -527,9 +549,32 @@ export class SessionSearch {
     const params: any[] = [];
     const { limit = 20, offset = 0, orderBy = 'relevance', ...filters } = options;
 
-    // Build filter conditions (join with sdk_sessions for project filtering)
+    // Build filter conditions (join with sdk_sessions for repo/project scoping)
     const baseConditions: string[] = [];
-    if (filters.project) {
+
+    if (filters.repoId) {
+      const repoIdentityClauses = ['s.repo_id = ?'];
+      params.push(filters.repoId);
+
+      if (filters.repoRoot) {
+        repoIdentityClauses.push('(s.repo_id IS NULL AND s.repo_root = ?)');
+        params.push(filters.repoRoot);
+      }
+      if (filters.project) {
+        repoIdentityClauses.push('(s.repo_id IS NULL AND s.repo_root IS NULL AND s.project = ?)');
+        params.push(filters.project);
+      }
+
+      baseConditions.push(`(${repoIdentityClauses.join(' OR ')})`);
+    } else if (filters.repoRoot) {
+      if (filters.project) {
+        baseConditions.push('(s.repo_root = ? OR (s.repo_root IS NULL AND s.project = ?))');
+        params.push(filters.repoRoot, filters.project);
+      } else {
+        baseConditions.push('s.repo_root = ?');
+        params.push(filters.repoRoot);
+      }
+    } else if (filters.project) {
       baseConditions.push('s.project = ?');
       params.push(filters.project);
     }

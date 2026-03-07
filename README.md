@@ -1,149 +1,61 @@
-<p align="center">
-  Official $CMEM Links: 
-  <a href="https://bags.fm/2TsmuYUrsctE57VLckZBYEEzdokUF8j8e1GavekWBAGS">Bags.fm</a> •
-  <a href="https://jup.ag/tokens/2TsmuYUrsctE57VLckZBYEEzdokUF8j8e1GavekWBAGS">Jupiter</a> •
-  <a href="https://photon-sol.tinyastro.io/en/lp/6MzFAkWnac6GSK1EdFX93dZeukGfzrFq4UHWarhGSQyd">Photon</a> •
-  <a href="https://dexscreener.com/solana/6mzfakwnac6gsk1edfx93dzeukgfzrfq4uhwarhgsqyd">DEXScreener</a>
-</p>
+<h1>Codex-mem</h1>
 
-<p align="center">Official CA: 2TsmuYUrsctE57VLckZBYEEzdokUF8j8e1GavekWBAGS (on Solana)</p>
+Persistent memory for Codex CLI, Claude Code, and MCP clients.
 
-<h1 align="center">
-  <br>
-  <a href="https://github.com/thedotmack/claude-mem">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-dark-mode.webp">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-light-mode.webp">
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/claude-mem-logo-for-light-mode.webp" alt="Claude-Mem" width="400">
-    </picture>
-  </a>
-  <br>
-</h1>
+> Codex-mem is a Codex-first port of [claude-mem](https://github.com/thedotmack/claude-mem) by Alex Newman ([@thedotmack](https://github.com/thedotmack)). The upstream project got the core memory architecture right. This repo carries that work forward for Codex with official Codex integration surfaces, passive `MEMORY.md` recall, and one-line setup.
 
-<p align="center">
-  <a href="docs/i18n/README.zh.md">🇨🇳 中文</a> •
-  <a href="docs/i18n/README.zh-tw.md">🇹🇼 繁體中文</a> •
-  <a href="docs/i18n/README.ja.md">🇯🇵 日本語</a> •
-  <a href="docs/i18n/README.pt.md">🇵🇹 Português</a> •
-  <a href="docs/i18n/README.pt-br.md">🇧🇷 Português</a> •
-  <a href="docs/i18n/README.ko.md">🇰🇷 한국어</a> •
-  <a href="docs/i18n/README.es.md">🇪🇸 Español</a> •
-  <a href="docs/i18n/README.de.md">🇩🇪 Deutsch</a> •
-  <a href="docs/i18n/README.fr.md">🇫🇷 Français</a> •
-  <a href="docs/i18n/README.he.md">🇮🇱 עברית</a> •
-  <a href="docs/i18n/README.ar.md">🇸🇦 العربية</a> •
-  <a href="docs/i18n/README.ru.md">🇷🇺 Русский</a> •
-  <a href="docs/i18n/README.pl.md">🇵🇱 Polski</a> •
-  <a href="docs/i18n/README.cs.md">🇨🇿 Čeština</a> •
-  <a href="docs/i18n/README.nl.md">🇳🇱 Nederlands</a> •
-  <a href="docs/i18n/README.tr.md">🇹🇷 Türkçe</a> •
-  <a href="docs/i18n/README.uk.md">🇺🇦 Українська</a> •
-  <a href="docs/i18n/README.vi.md">🇻🇳 Tiếng Việt</a> •
-  <a href="docs/i18n/README.tl.md">🇵🇭 Tagalog</a> •
-  <a href="docs/i18n/README.id.md">🇮🇩 Indonesia</a> •
-  <a href="docs/i18n/README.th.md">🇹🇭 ไทย</a> •
-  <a href="docs/i18n/README.hi.md">🇮🇳 हिन्दी</a> •
-  <a href="docs/i18n/README.bn.md">🇧🇩 বাংলা</a> •
-  <a href="docs/i18n/README.ur.md">🇵🇰 اردو</a> •
-  <a href="docs/i18n/README.ro.md">🇷🇴 Română</a> •
-  <a href="docs/i18n/README.sv.md">🇸🇪 Svenska</a> •
-  <a href="docs/i18n/README.it.md">🇮🇹 Italiano</a> •
-  <a href="docs/i18n/README.el.md">🇬🇷 Ελληνικά</a> •
-  <a href="docs/i18n/README.hu.md">🇭🇺 Magyar</a> •
-  <a href="docs/i18n/README.fi.md">🇫🇮 Suomi</a> •
-  <a href="docs/i18n/README.da.md">🇩🇰 Dansk</a> •
-  <a href="docs/i18n/README.no.md">🇳🇴 Norsk</a>
-</p>
-
-<h4 align="center">Persistent memory compression system built for <a href="https://claude.com/claude-code" target="_blank">Claude Code</a>.</h4>
-
-<p align="center">
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/License-AGPL%203.0-blue.svg" alt="License">
-  </a>
-  <a href="package.json">
-    <img src="https://img.shields.io/badge/version-6.5.0-green.svg" alt="Version">
-  </a>
-  <a href="package.json">
-    <img src="https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg" alt="Node">
-  </a>
-  <a href="https://github.com/thedotmack/awesome-claude-code">
-    <img src="https://awesome.re/mentioned-badge.svg" alt="Mentioned in Awesome Claude Code">
-  </a>
-</p>
-
-<p align="center">
-  <a href="https://trendshift.io/repositories/15496" target="_blank">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge-dark.svg">
-      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg">
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/trendshift-badge.svg" alt="thedotmack/claude-mem | Trendshift" width="250" height="55"/>
-    </picture>
-  </a>
-</p>
-
-<br>
-
-<p align="center">
-  <a href="https://github.com/thedotmack/claude-mem">
-    <picture>
-      <img src="https://raw.githubusercontent.com/thedotmack/claude-mem/main/docs/public/cm-preview.gif" alt="Claude-Mem Preview" width="800">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <a href="#quick-start">Quick Start</a> •
-  <a href="#how-it-works">How It Works</a> •
-  <a href="#mcp-search-tools">Search Tools</a> •
-  <a href="#documentation">Documentation</a> •
-  <a href="#configuration">Configuration</a> •
-  <a href="#troubleshooting">Troubleshooting</a> •
-  <a href="#license">License</a>
-</p>
-
-<p align="center">
-  Claude-Mem seamlessly preserves context across sessions by automatically capturing tool usage observations, generating semantic summaries, and making them available to future sessions. This enables Claude to maintain continuity of knowledge about projects even after sessions end or reconnect.
-</p>
-
----
+[NOTICE](NOTICE.md) explains the upstream credit and license continuity.
 
 ## Quick Start
 
-Start a new Claude Code session in the terminal and enter the following commands:
+### Codex CLI
 
-```
-/plugin marketplace add thedotmack/claude-mem
-
-/plugin install claude-mem
+```bash
+npx codex-mem-cli@latest codex setup
 ```
 
-Restart Claude Code. Context from previous sessions will automatically appear in new sessions.
+After setup, start Codex normally:
 
-> **Note:** Claude-Mem is also published on npm, but `npm install -g claude-mem` installs the **SDK/library only** — it does not register the plugin hooks or set up the worker service. To use Claude-Mem as a plugin, always install via the `/plugin` commands above.
+```bash
+codex
+```
 
-### 🦞 OpenClaw Gateway
+That one command:
 
-Install claude-mem as a persistent memory plugin on [OpenClaw](https://openclaw.ai) gateways with a single command:
+- installs Bun, `uv`, and runtime dependencies if needed
+- copies the runtime into a stable local install directory
+- updates `~/.codex/config.toml` with `notify` and `[mcp_servers.codex_mem]`
+- preserves and chains an existing `notify` command when it can do so safely
+- starts the worker and verifies health before exiting
+
+> npm note: the registry package is `codex-mem-cli` because `codex-mem` is already taken on npm. The GitHub project and installed CLI command are both `codex-mem`.
+
+### Claude Code
+
+Codex-mem still carries forward the upstream Claude Code integration model. If you want the original Claude plugin workflow, install upstream [claude-mem](https://github.com/thedotmack/claude-mem) or adapt the plugin assets in this repo to your Claude plugin environment.
+
+### OpenClaw Gateway
+
+Install the OpenClaw integration with:
 
 ```bash
 curl -fsSL https://install.cmem.ai/openclaw.sh | bash
 ```
 
-The installer handles dependencies, plugin setup, AI provider configuration, worker startup, and optional real-time observation feeds to Telegram, Discord, Slack, and more. See the [OpenClaw Integration Guide](https://docs.claude-mem.ai/openclaw-integration) for details.
+## Why It Exists
 
-**Key Features:**
+- Codex CLI can read MCP memory today, but write capture needs Codex-native ingestion surfaces.
+- claude-mem already proved the worker, search, and progressive-recall model.
+- Codex-mem adds `notify`, `codex exec --json`, and `codex app-server` capture so the same memory architecture works well in Codex.
 
-- 🧠 **Persistent Memory** - Context survives across sessions
-- 📊 **Progressive Disclosure** - Layered memory retrieval with token cost visibility
-- 🔍 **Skill-Based Search** - Query your project history with mem-search skill
-- 🖥️ **Web Viewer UI** - Real-time memory stream at http://localhost:37777
-- 💻 **Claude Desktop Skill** - Search memory from Claude Desktop conversations
-- 🔒 **Privacy Control** - Use `<private>` tags to exclude sensitive content from storage
-- ⚙️ **Context Configuration** - Fine-grained control over what context gets injected
-- 🤖 **Automatic Operation** - No manual intervention required
-- 🔗 **Citations** - Reference past observations with IDs (access via http://localhost:37777/api/observation/{id} or view all in the web viewer at http://localhost:37777)
-- 🧪 **Beta Channel** - Try experimental features like Endless Mode via version switching
+## Key Features
+
+- Persistent cross-session memory with SQLite, FTS5, and optional vector search
+- Codex-native ingestion via `notify`, `exec --json`, and `app-server`
+- Token-efficient recall through `bootstrap_memory`, `search`, `timeline`, and `get_observations`
+- Root `MEMORY.md` projections for passive recall in Codex
+- Web viewer on `http://localhost:37777`
+- Privacy controls including `<private>` stripping before persistence
 
 ---
 
@@ -198,16 +110,19 @@ See [Architecture Overview](https://docs.claude-mem.ai/architecture/overview) fo
 
 ## MCP Search Tools
 
-Claude-Mem provides intelligent memory search through **4 MCP tools** following a token-efficient **3-layer workflow pattern**:
+Codex-mem provides intelligent memory search through **4 MCP tools** following a token-efficient **4-step workflow pattern**:
 
-**The 3-Layer Workflow:**
+**The Workflow:**
 
-1. **`search`** - Get compact index with IDs (~50-100 tokens/result)
-2. **`timeline`** - Get chronological context around interesting results
-3. **`get_observations`** - Fetch full details ONLY for filtered IDs (~500-1,000 tokens/result)
+1. **`bootstrap_memory`** - Build a compact memory brief for the current project/task
+2. **`search`** - Get compact index with IDs (~50-100 tokens/result)
+3. **`timeline`** - Get chronological context around interesting results
+4. **`get_observations`** - Fetch full details ONLY for filtered IDs (~500-1,000 tokens/result)
 
 **How It Works:**
-- Claude uses MCP tools to search your memory
+- Claude and Codex can use MCP tools to search your memory
+- Start with `bootstrap_memory` when resuming work in a new session
+- Prefer passing `cwd` for repo-aware recall; `project` alone is a legacy fallback
 - Start with `search` to get an index of results
 - Use `timeline` to see what was happening around specific observations
 - Use `get_observations` to fetch full details for relevant IDs
@@ -215,31 +130,88 @@ Claude-Mem provides intelligent memory search through **4 MCP tools** following 
 
 **Available MCP Tools:**
 
-1. **`search`** - Search memory index with full-text queries, filters by type/date/project
-2. **`timeline`** - Get chronological context around a specific observation or query
-3. **`get_observations`** - Fetch full observation details by IDs (always batch multiple IDs)
+1. **`bootstrap_memory`** - Compact project memory brief with follow-up observation IDs and repo-aware scoping via `cwd`/`repoRoot`
+2. **`search`** - Search memory index with full-text queries, filters by type/date/project
+3. **`timeline`** - Get chronological context around a specific observation or query
+4. **`get_observations`** - Fetch full observation details by IDs (always batch multiple IDs)
 
 **Example Usage:**
 
 ```typescript
-// Step 1: Search for index
+// Step 1: Build a brief
+bootstrap_memory(goal="resume auth refactor", cwd="/path/to/repo")
+
+// Step 2: Search for index
 search(query="authentication bug", type="bugfix", limit=10)
 
-// Step 2: Review index, identify relevant IDs (e.g., #123, #456)
+// Step 3: Review index, identify relevant IDs (e.g., #123, #456)
 
-// Step 3: Fetch full details
+// Step 4: Fetch full details
 get_observations(ids=[123, 456])
 ```
 
-See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for detailed examples.
+See [Search Tools Guide](https://docs.claude-mem.ai/usage/search-tools) for the upstream workflow background.
 
 ---
 
-## Beta Features
+## Codex CLI
 
-Claude-Mem offers a **beta channel** with experimental features like **Endless Mode** (biomimetic memory architecture for extended sessions). Switch between stable and beta versions from the web viewer UI at http://localhost:37777 → Settings.
+**Quick install for Codex CLI:**
 
-See **[Beta Features Documentation](https://docs.claude-mem.ai/beta-features)** for details on Endless Mode and how to try it.
+```bash
+npx codex-mem-cli@latest codex setup
+```
+
+That one command:
+
+- copies the bundled runtime to `~/.claude-mem/codex`
+- installs Bun, `uv`, and runtime dependencies if needed
+- updates `~/.codex/config.toml` with `notify` plus `[mcp_servers.codex_mem]`
+- preserves and chains an existing `notify` command when it is a standard string-array config
+- starts the worker and verifies health on `http://127.0.0.1:37777`
+
+**Health check after install:**
+
+```bash
+npx codex-mem-cli@latest codex doctor
+```
+
+After setup, keep using `codex` normally. The viewer stays available at `http://localhost:37777`.
+
+**Manual / advanced setup:**
+
+The worker now supports three Codex ingestion lanes:
+
+1. `notify` for stock Codex CLI turn-complete capture
+2. `exec --json` for CI / automation ingestion
+3. `app-server` for higher-fidelity streamed events
+
+**Safe MCP setup today (stdio transport):**
+
+```toml
+[mcp_servers.codex_mem]
+command = "/ABS/PATH/TO/node"
+args = ["/Users/YOU/.claude-mem/codex/scripts/mcp-server.cjs"]
+enabled = true
+required = false
+```
+
+**Codex notify example:**
+
+```toml
+notify = ["/ABS/PATH/TO/node", "/Users/YOU/.claude-mem/codex/scripts/codex-notify.js"]
+```
+
+**Automation / CI ingest example:**
+
+```bash
+codex exec --json "implement X" | node ~/.claude-mem/codex/scripts/bun-runner.js ~/.claude-mem/codex/scripts/worker-service.cjs codex exec-json
+```
+
+**Passive recall:**
+
+- Enable `CLAUDE_MEM_MEMORY_MD_ENABLED=true` to keep a root `MEMORY.md` projection updated.
+- Add `"MEMORY.md"` to Codex `project_doc_fallback_filenames` if you want Codex to load that projection automatically.
 
 ---
 
@@ -266,7 +238,7 @@ Make sure Node.js and npm are installed and added to your PATH. Download the lat
 
 ## Configuration
 
-Settings are managed in `~/.claude-mem/settings.json` (auto-created with defaults on first run). Configure AI model, worker port, data directory, log level, and context injection settings.
+Settings are managed in `~/.claude-mem/settings.json` (auto-created with defaults on first run). That path is inherited from the upstream claude-mem architecture for compatibility.
 
 See the **[Configuration Guide](https://docs.claude-mem.ai/configuration)** for all available settings and examples.
 
@@ -330,12 +302,10 @@ See the [LICENSE](LICENSE) file for full details.
 
 ## Support
 
-- **Documentation**: [docs/](docs/)
-- **Issues**: [GitHub Issues](https://github.com/thedotmack/claude-mem/issues)
-- **Repository**: [github.com/thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)
-- **Official X Account**: [@Claude_Memory](https://x.com/Claude_Memory)
-- **Official Discord**: [Join Discord](https://discord.com/invite/J4wttp9vDu)
-- **Author**: Alex Newman ([@thedotmack](https://github.com/thedotmack))
+- **Repository**: [github.com/KeystoneScience/codex-mem](https://github.com/KeystoneScience/codex-mem)
+- **Issues**: [GitHub Issues](https://github.com/KeystoneScience/codex-mem/issues)
+- **Upstream Project**: [github.com/thedotmack/claude-mem](https://github.com/thedotmack/claude-mem)
+- **Credit**: Alex Newman ([@thedotmack](https://github.com/thedotmack)) for the original claude-mem architecture
 
 ---
 

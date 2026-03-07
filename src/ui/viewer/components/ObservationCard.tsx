@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Observation } from '../types';
 import { formatDate } from '../utils/formatters';
+import { MetadataBadges } from './MetadataBadges';
 
 interface ObservationCardProps {
   observation: Observation;
@@ -92,6 +93,13 @@ export function ObservationCard({ observation }: ObservationCardProps) {
 
       {/* Title */}
       <div className="card-title">{observation.title || 'Untitled'}</div>
+      <MetadataBadges
+        platform={observation.platform}
+        clientKind={observation.client_kind}
+        captureMode={observation.capture_mode}
+        gitBranch={observation.git_branch}
+        agentRole={observation.agent_role}
+      />
 
       {/* Content based on toggle state */}
       <div className="view-mode-content">

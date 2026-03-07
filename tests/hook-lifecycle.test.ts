@@ -9,6 +9,7 @@
  * - Claude Code adapter defaults suppressOutput to true
  */
 import { describe, it, expect, beforeEach, afterEach, mock } from 'bun:test';
+import { fileURLToPath } from 'url';
 
 // --- Event Handler Tests ---
 
@@ -354,7 +355,7 @@ describe('hookCommand - stderr suppression', () => {
 
     // Verify the import includes logger
     const hookCommandSource = await Bun.file(
-      new URL('../src/cli/hook-command.ts', import.meta.url).pathname
+      fileURLToPath(new URL('../src/cli/hook-command.ts', import.meta.url))
     ).text();
 
     // Should import logger

@@ -1,8 +1,10 @@
 {
-  "name": "claude-mem",
-  "version": "10.5.2",
-  "description": "Memory compression system for Claude Code - persist context across sessions",
+  "name": "codex-mem-cli",
+  "version": "11.0.0",
+  "description": "Persistent memory for Codex CLI, Claude Code, and MCP clients",
   "keywords": [
+    "codex",
+    "codex-cli",
     "claude",
     "claude-code",
     "claude-agent-sdk",
@@ -15,31 +17,31 @@
     "typescript",
     "nodejs"
   ],
-  "author": "Alex Newman",
+  "author": "Keystone Science",
+  "contributors": [
+    "Alex Newman (@thedotmack) - upstream claude-mem"
+  ],
   "license": "AGPL-3.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/thedotmack/claude-mem.git"
+    "url": "https://github.com/KeystoneScience/codex-mem.git"
   },
-  "homepage": "https://github.com/thedotmack/claude-mem#readme",
+  "homepage": "https://github.com/KeystoneScience/codex-mem#readme",
   "bugs": {
-    "url": "https://github.com/thedotmack/claude-mem/issues"
+    "url": "https://github.com/KeystoneScience/codex-mem/issues"
+  },
+  "bin": {
+    "codex-mem": "./bin/codex-mem.js",
+    "claude-mem": "./bin/codex-mem.js"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    },
-    "./sdk": {
-      "types": "./dist/sdk/index.d.ts",
-      "import": "./dist/sdk/index.js"
-    },
-    "./modes/*": "./plugin/modes/*"
-  },
   "files": [
-    "dist",
-    "plugin"
+    "plugin",
+    "bin",
+    "NOTICE.md"
   ],
   "engines": {
     "node": ">=18.0.0",
@@ -60,11 +62,16 @@
     "worker:stop": "bun plugin/scripts/worker-service.cjs stop",
     "worker:restart": "bun plugin/scripts/worker-service.cjs restart",
     "worker:status": "bun plugin/scripts/worker-service.cjs status",
+    "codex:notify": "bun plugin/scripts/worker-service.cjs codex notify",
+    "codex:exec-json": "bun plugin/scripts/worker-service.cjs codex exec-json",
+    "codex:app-server": "bun plugin/scripts/worker-service.cjs codex app-server",
     "queue": "bun scripts/check-pending-queue.ts",
     "queue:process": "bun scripts/check-pending-queue.ts --process",
     "queue:clear": "bun scripts/clear-failed-queue.ts --all --force",
     "claude-md:regenerate": "bun scripts/regenerate-claude-md.ts",
     "claude-md:dry-run": "bun scripts/regenerate-claude-md.ts --dry-run",
+    "memory-md:generate": "bun plugin/scripts/worker-service.cjs memory-md generate",
+    "memory-md:clean": "bun plugin/scripts/worker-service.cjs memory-md clean",
     "translate-readme": "bun scripts/translate-readme/cli.ts -v -o docs/i18n README.md",
     "translate:tier1": "npm run translate-readme -- zh zh-tw ja pt-br ko es de fr",
     "translate:tier2": "npm run translate-readme -- he ar ru pl cs nl tr uk",

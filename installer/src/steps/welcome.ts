@@ -6,7 +6,7 @@ import { expandHome } from '../utils/system.js';
 export type InstallMode = 'fresh' | 'upgrade' | 'configure';
 
 export async function runWelcome(): Promise<InstallMode> {
-  p.intro(pc.bgCyan(pc.black(' claude-mem installer ')));
+  p.intro(pc.bgCyan(pc.black(' codex-mem installer ')));
 
   p.log.info(`Version: 1.0.0`);
   p.log.info(`Platform: ${process.platform} (${process.arch})`);
@@ -17,7 +17,7 @@ export async function runWelcome(): Promise<InstallMode> {
   const alreadyInstalled = settingsExist && pluginExist;
 
   if (alreadyInstalled) {
-    p.log.warn('Existing claude-mem installation detected.');
+    p.log.warn('Existing Codex-mem or claude-mem-compatible installation detected.');
   }
 
   const installMode = await p.select({

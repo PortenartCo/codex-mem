@@ -33,7 +33,7 @@ function registerMarketplace(): void {
   knownMarketplaces['thedotmack'] = {
     source: {
       source: 'github',
-      repo: 'thedotmack/claude-mem',
+      repo: 'KeystoneScience/codex-mem',
     },
     installLocation: MARKETPLACE_DIR,
     lastUpdated: new Date().toISOString(),
@@ -97,11 +97,11 @@ export async function runInstallation(selectedIDEs: IDE[]): Promise<void> {
 
   await p.tasks([
     {
-      title: 'Cloning claude-mem repository',
+      title: 'Cloning codex-mem repository',
       task: async (message) => {
         message('Downloading latest release...');
         execSync(
-          `git clone --depth 1 https://github.com/thedotmack/claude-mem.git "${tempDir}"`,
+          `git clone --depth 1 https://github.com/KeystoneScience/codex-mem.git "${tempDir}"`,
           { stdio: 'pipe' },
         );
         return `Repository cloned ${pc.green('OK')}`;

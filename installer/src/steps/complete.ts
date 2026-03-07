@@ -52,5 +52,5 @@ export function runCompletion(
 
   p.note(nextStepsLines.join('\n'), 'Next Steps');
 
-  p.outro(pc.green('claude-mem installed successfully!'));
+  p.outro(pc.green('codex-mem installed successfully!'));
 }

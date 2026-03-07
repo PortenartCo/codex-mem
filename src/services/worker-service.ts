@@ -100,6 +100,7 @@ import {
   updateCursorContextForProject,
   handleCursorCommand
 } from './integrations/CursorHooksInstaller.js';
+import { handleCodexCommand } from './platform/codex-ingest.js';
 
 // Service layer imports
 import { DatabaseManager } from './worker/DatabaseManager.js';
@@ -1001,14 +1002,6 @@ async function ensureWorkerStarted(port: number): Promise<boolean> {
 
 async function main() {
   const command = process.argv[2];
-
-  // Early exit if plugin is disabled in Claude Code settings (#781).
-  // Only gate hook-initiated commands; CLI management (stop/status) still works.
-  const hookInitiatedCommands = ['start', 'hook', 'restart', '--daemon'];
-  if ((hookInitiatedCommands.includes(command) || command === undefined) && isPluginDisabledInClaudeSettings()) {
-    process.exit(0);
-  }
-
   const port = getWorkerPort();
 
   // Helper for JSON status output in 'start' command
@@ -1016,6 +1009,16 @@ async function main() {
   function exitWithStatus(status: 'ready' | 'error', message?: string): never {
     const output = buildStatusOutput(status, message);
     console.log(JSON.stringify(output));
+    process.exit(0);
+  }
+
+  // Early exit if plugin is disabled in Claude Code settings (#781).
+  // Only gate hook-initiated commands; CLI management (stop/status) still works.
+  const hookInitiatedCommands = ['start', 'hook', 'restart', '--daemon'];
+  if ((hookInitiatedCommands.includes(command) || command === undefined) && isPluginDisabledInClaudeSettings()) {
+    if (command === 'start') {
+      exitWithStatus('ready', 'Plugin disabled in Claude settings');
+    }
     process.exit(0);
   }
 
@@ -1101,6 +1104,24 @@ async function main() {
       break;
     }
 
+    case 'codex': {
+      const subcommand = process.argv[3];
+      if (!subcommand) {
+        console.error('Usage: codex-mem codex <notify|exec-json|app-server> [--file path]');
+        process.exit(1);
+      }
+
+      const workerReady = await ensureWorkerStarted(port);
+      if (!workerReady) {
+        logger.error('SYSTEM', 'Worker failed to start before Codex ingest', { subcommand });
+        process.exit(1);
+      }
+
+      const codexResult = await handleCodexCommand(subcommand, process.argv.slice(4));
+      process.exit(codexResult);
+      break;
+    }
+
     case 'hook': {
       // Auto-start worker if not running
       const workerReady = await ensureWorkerStarted(port);
@@ -1112,7 +1133,7 @@ async function main() {
       const platform = process.argv[3];
       const event = process.argv[4];
       if (!platform || !event) {
-        console.error('Usage: claude-mem hook <platform> <event>');
+        console.error('Usage: codex-mem hook <platform> <event>');
         console.error('Platforms: claude-code, cursor, raw');
         console.error('Events: context, session-init, observation, summarize, session-complete');
         process.exit(1);
@@ -1160,6 +1181,32 @@ async function main() {
       const { cleanClaudeMd } = await import('../cli/claude-md-commands.js');
       const result = await cleanClaudeMd(dryRun);
       process.exit(result);
+      break;
+    }
+
+    case 'memory-md': {
+      const action = process.argv[3] || 'generate';
+      const dryRun = process.argv.includes('--dry-run');
+      const { generateMemoryMdProjection, cleanMemoryMdProjection } = await import('./projections/memory-md.js');
+
+      if (action === 'clean') {
+        const result = cleanMemoryMdProjection({ dryRun });
+        console.log(JSON.stringify(result, null, 2));
+        process.exit(0);
+      }
+
+      const result = generateMemoryMdProjection({ dryRun });
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(0);
+      break;
+    }
+
+    case 'clean-projections': {
+      const dryRun = process.argv.includes('--dry-run');
+      const { cleanMemoryMdProjection } = await import('./projections/memory-md.js');
+      const result = cleanMemoryMdProjection({ dryRun });
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(0);
       break;
     }
 

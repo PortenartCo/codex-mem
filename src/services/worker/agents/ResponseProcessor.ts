@@ -18,6 +18,7 @@ import { updateFolderClaudeMdFiles } from '../../../utils/claude-md-utils.js';
 import { getWorkerPort } from '../../../shared/worker-utils.js';
 import { SettingsDefaultsManager } from '../../../shared/SettingsDefaultsManager.js';
 import { USER_SETTINGS_PATH } from '../../../shared/paths.js';
+import { generateMemoryMdProjection } from '../../projections/memory-md.js';
 import type { ActiveSession } from '../../worker-types.js';
 import type { DatabaseManager } from '../DatabaseManager.js';
 import type { SessionManager } from '../SessionManager.js';
@@ -102,7 +103,20 @@ export async function processAgentResponse(
     summaryForStore,
     session.lastPromptNumber,
     discoveryTokens,
-    originalTimestamp ?? undefined
+    originalTimestamp ?? undefined,
+    {
+      platform: session.platform,
+      clientKind: session.clientKind,
+      captureMode: session.captureMode,
+      captureFidelity: session.captureMode === 'app-server' ? 'high' : (session.captureMode === 'exec-json' ? 'medium' : 'low'),
+      platformSessionId: session.platformSessionId,
+      repoRoot: session.repoRoot,
+      repoId: session.repoId,
+      gitBranch: session.gitBranch,
+      gitCommit: session.gitCommit,
+      parentSessionId: session.parentSessionId,
+      agentRole: session.agentRole
+    }
   );
 
   // Log storage result with IDs for end-to-end traceability
@@ -146,6 +160,20 @@ export async function processAgentResponse(
     discoveryTokens,
     agentName
   );
+
+  const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
+  const memoryMdEnabled = settings.CLAUDE_MEM_MEMORY_MD_ENABLED === 'true';
+  const projectionCwd = session.repoRoot || projectRoot;
+  if (memoryMdEnabled && projectionCwd) {
+    Promise.resolve().then(() => {
+      generateMemoryMdProjection({ cwd: projectionCwd });
+    }).catch((error) => {
+      logger.warn('SYSTEM', 'MEMORY.md update failed (non-critical)', {
+        project: session.project,
+        repoRoot: projectionCwd
+      }, error as Error);
+    });
+  }
 
   // Clean up session state
   cleanupProcessedMessages(session, worker);
@@ -234,7 +262,16 @@ async function syncAndBroadcastObservations(
       files_modified: JSON.stringify(obs.files_modified || []),
       project: session.project,
       prompt_number: session.lastPromptNumber,
-      created_at_epoch: result.createdAtEpoch
+      created_at_epoch: result.createdAtEpoch,
+      platform: session.platform,
+      client_kind: session.clientKind,
+      capture_mode: session.captureMode,
+      platform_session_id: session.platformSessionId,
+      repo_root: session.repoRoot,
+      repo_id: session.repoId,
+      git_branch: session.gitBranch,
+      parent_session_id: session.parentSessionId,
+      agent_role: session.agentRole
     });
   }
 
@@ -244,7 +281,7 @@ async function syncAndBroadcastObservations(
   const settings = SettingsDefaultsManager.loadFromFile(USER_SETTINGS_PATH);
   // Handle both string 'true' and boolean true from JSON settings
   const settingValue = settings.CLAUDE_MEM_FOLDER_CLAUDEMD_ENABLED;
-  const folderClaudeMdEnabled = settingValue === 'true' || settingValue === true;
+  const folderClaudeMdEnabled = settingValue === 'true';
 
   if (folderClaudeMdEnabled) {
     const allFilePaths: string[] = [];
@@ -320,7 +357,16 @@ async function syncAndBroadcastSummary(
     notes: summary!.notes,
     project: session.project,
     prompt_number: session.lastPromptNumber,
-    created_at_epoch: result.createdAtEpoch
+    created_at_epoch: result.createdAtEpoch,
+    platform: session.platform,
+    client_kind: session.clientKind,
+    capture_mode: session.captureMode,
+    platform_session_id: session.platformSessionId,
+    repo_root: session.repoRoot,
+    repo_id: session.repoId,
+    git_branch: session.gitBranch,
+    parent_session_id: session.parentSessionId,
+    agent_role: session.agentRole
   });
 
   // Update Cursor context file for registered projects (fire-and-forget)

@@ -24,6 +24,7 @@ import type { ObservationSearchResult, SessionSummarySearchResult, UserPromptSea
 import { logger } from '../../utils/logger.js';
 import { formatDate, formatTime, formatDateTime, extractFirstFile, groupByDate, estimateTokens } from '../../shared/timeline-formatting.js';
 import { ModeManager } from '../domain/ModeManager.js';
+import { getRepoContext } from '../platform/repo-context.js';
 
 import {
   SearchOrchestrator,
@@ -114,7 +115,102 @@ export class SearchManager {
       normalized.isFolder = false;
     }
 
+    if (normalized.repo_root && !normalized.repoRoot) {
+      normalized.repoRoot = normalized.repo_root;
+    }
+    if (normalized.repo_id && !normalized.repoId) {
+      normalized.repoId = normalized.repo_id;
+    }
+
     return normalized;
+  }
+
+  private resolveMemoryScope(args: any): {
+    project: string;
+    repoRoot?: string;
+    repoId?: string;
+    repoScoped: boolean;
+  } {
+    const explicitProjectOnly = Boolean(args.project) && !args.cwd && !args.repoRoot && !args.repoId;
+    if (explicitProjectOnly) {
+      return {
+        project: args.project,
+        repoScoped: false
+      };
+    }
+
+    const repo = getRepoContext(args.cwd || args.repoRoot || process.cwd());
+    return {
+      project: args.project || repo.project || basename(process.cwd()),
+      repoRoot: args.repoRoot || repo.repoRoot,
+      repoId: args.repoId || repo.repoId,
+      repoScoped: true
+    };
+  }
+
+  private getScopedRecentSessions(
+    project: string,
+    limit: number,
+    scope: { repoRoot?: string; repoId?: string; repoScoped: boolean }
+  ) {
+    if (scope.repoScoped) {
+      return this.sessionStore.getRecentSessionsWithStatus(project, limit, {
+        repoRoot: scope.repoRoot,
+        repoId: scope.repoId
+      });
+    }
+
+    return this.sessionStore.getRecentSessionsWithStatus(project, limit);
+  }
+
+  private async getScopedObservations(
+    goal: string | undefined,
+    limit: number,
+    scope: { project: string; repoRoot?: string; repoId?: string; repoScoped: boolean }
+  ): Promise<ObservationSearchResult[]> {
+    const repoScopedOptions = {
+      project: scope.project,
+      repoRoot: scope.repoRoot,
+      repoId: scope.repoId,
+      limit,
+      orderBy: 'date_desc' as const
+    };
+
+    if (goal && this.chromaSync) {
+      try {
+        const semanticCandidateLimit = scope.repoScoped
+          ? Math.max(limit * 20, 100)
+          : Math.max(limit * 5, 25);
+        const chromaResults = await this.queryChroma(goal, semanticCandidateLimit, { project: scope.project });
+        if (chromaResults.ids.length > 0) {
+          const recentIds = chromaResults.ids.filter((_id, idx) => {
+            const meta = chromaResults.metadatas[idx];
+            return meta && meta.created_at_epoch > Date.now() - SEARCH_CONSTANTS.RECENCY_WINDOW_MS;
+          });
+
+          const hydrated = this.sessionStore.getObservationsByIds(recentIds, repoScopedOptions);
+          if (hydrated.length > 0 || !scope.repoScoped) {
+            return hydrated;
+          }
+
+          logger.debug('SEARCH', 'bootstrap_memory semantic hits did not survive repo-aware hydration', {
+            project: scope.project,
+            repoId: scope.repoId,
+            repoRoot: scope.repoRoot,
+            semanticCandidates: recentIds.length
+          });
+        }
+      } catch (error) {
+        logger.warn('SEARCH', 'bootstrap_memory semantic lookup failed, falling back to recent scoped observations', {
+          project: scope.project,
+          repoId: scope.repoId,
+          repoRoot: scope.repoRoot
+        }, error as Error);
+      }
+    }
+
+    const observations = this.sessionSearch.searchObservations(undefined, repoScopedOptions);
+    return observations;
   }
 
   /**
@@ -215,10 +311,22 @@ export class SearchManager {
           observations = this.sessionStore.getObservationsByIds(obsIds, obsOptions);
         }
         if (sessionIds.length > 0) {
-          sessions = this.sessionStore.getSessionSummariesByIds(sessionIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
+          sessions = this.sessionStore.getSessionSummariesByIds(sessionIds, {
+            orderBy: 'date_desc',
+            limit: options.limit,
+            project: options.project,
+            repoRoot: options.repoRoot,
+            repoId: options.repoId
+          });
         }
         if (promptIds.length > 0) {
-          prompts = this.sessionStore.getUserPromptsByIds(promptIds, { orderBy: 'date_desc', limit: options.limit, project: options.project });
+          prompts = this.sessionStore.getUserPromptsByIds(promptIds, {
+            orderBy: 'date_desc',
+            limit: options.limit,
+            project: options.project,
+            repoRoot: options.repoRoot,
+            repoId: options.repoId
+          });
         }
 
         logger.debug('SEARCH', 'Hydrated results from SQLite', { observations: observations.length, sessions: sessions.length, prompts: prompts.length });
@@ -887,7 +995,13 @@ export class SearchManager {
         // Step 3: Hydrate from SQLite in temporal order
         if (recentIds.length > 0) {
           const limit = options.limit || 20;
-          results = this.sessionStore.getObservationsByIds(recentIds, { orderBy: 'date_desc', limit });
+          results = this.sessionStore.getObservationsByIds(recentIds, {
+            orderBy: 'date_desc',
+            limit,
+            project: options.project,
+            repoRoot: options.repoRoot,
+            repoId: options.repoId
+          });
           logger.debug('SEARCH', 'Hydrated observations from SQLite', { count: results.length });
         }
       }
@@ -944,7 +1058,13 @@ export class SearchManager {
         // Step 3: Hydrate from SQLite in temporal order
         if (recentIds.length > 0) {
           const limit = options.limit || 20;
-          results = this.sessionStore.getSessionSummariesByIds(recentIds, { orderBy: 'date_desc', limit });
+          results = this.sessionStore.getSessionSummariesByIds(recentIds, {
+            orderBy: 'date_desc',
+            limit,
+            project: options.project,
+            repoRoot: options.repoRoot,
+            repoId: options.repoId
+          });
           logger.debug('SEARCH', 'Hydrated sessions from SQLite', { count: results.length });
         }
       }
@@ -1001,7 +1121,13 @@ export class SearchManager {
         // Step 3: Hydrate from SQLite in temporal order
         if (recentIds.length > 0) {
           const limit = options.limit || 20;
-          results = this.sessionStore.getUserPromptsByIds(recentIds, { orderBy: 'date_desc', limit });
+          results = this.sessionStore.getUserPromptsByIds(recentIds, {
+            orderBy: 'date_desc',
+            limit,
+            project: options.project,
+            repoRoot: options.repoRoot,
+            repoId: options.repoId
+          });
           logger.debug('SEARCH', 'Hydrated user prompts from SQLite', { count: results.length });
         }
       }
@@ -1292,10 +1418,12 @@ export class SearchManager {
    * Tool handler: get_recent_context
    */
   async getRecentContext(args: any): Promise<any> {
-    const project = args.project || basename(process.cwd());
-    const limit = args.limit || 3;
+    const normalized = this.normalizeParams(args);
+    const scope = this.resolveMemoryScope(normalized);
+    const project = scope.project;
+    const limit = normalized.limit || 3;
 
-    const sessions = this.sessionStore.getRecentSessionsWithStatus(project, limit);
+    const sessions = this.getScopedRecentSessions(project, limit, scope);
 
     if (sessions.length === 0) {
       return {
@@ -1855,5 +1983,122 @@ export class SearchManager {
         }]
       };
     }
+  }
+
+  /**
+   * Tool handler: bootstrap_memory
+   *
+   * Builds a compact memory brief for the current project before deeper recall.
+   */
+  async bootstrapMemory(args: any): Promise<any> {
+    const normalized = this.normalizeParams(args);
+    const goal = (normalized.goal || normalized.query || '').trim();
+    const scope = this.resolveMemoryScope(normalized);
+    const project = scope.project;
+    const recentLimit = Math.max(1, Number(normalized.recent_limit || normalized.recentLimit || 3));
+    const observationLimit = Math.max(1, Number(normalized.limit || 5));
+
+    const sessions = this.getScopedRecentSessions(project, recentLimit, scope);
+    const observations = await this.getScopedObservations(goal || undefined, observationLimit, {
+      project,
+      repoRoot: scope.repoRoot,
+      repoId: scope.repoId,
+      repoScoped: scope.repoScoped
+    });
+
+    const observationIds = observations.map(observation => observation.id);
+    const recentDecisions = observations
+      .filter(observation => observation.type === 'decision' || observation.type === 'bugfix')
+      .slice(0, 3);
+
+    if (normalized.format === 'json') {
+      return {
+        project,
+        repoRoot: scope.repoRoot,
+        repoId: scope.repoId,
+        goal,
+        observationIds,
+        sessions,
+        observations,
+        recentDecisions
+      };
+    }
+
+    const lines: string[] = [];
+    lines.push('# Memory Brief');
+    lines.push('');
+    lines.push(`**Project:** ${project}`);
+    if (scope.repoRoot) {
+      lines.push(`**Repo Root:** ${scope.repoRoot}`);
+    }
+    if (goal) {
+      lines.push(`**Goal:** ${goal}`);
+    }
+    lines.push('');
+
+    if (sessions.length === 0) {
+      lines.push('No recent sessions found for this project.');
+    } else {
+      lines.push('## Recent Sessions');
+      lines.push('');
+
+      for (const session of sessions) {
+        const date = new Date(session.started_at).toLocaleString();
+        const status = session.status === 'active' ? 'active' : session.status;
+        const summary = session.memory_session_id
+          ? this.sessionStore.getSummaryForSession(session.memory_session_id)
+          : null;
+        const request = summary?.request || session.user_prompt || 'No request captured';
+        const completed = summary?.completed || summary?.learned || summary?.next_steps || null;
+
+        lines.push(`- ${date} | ${status} | ${request}`);
+        if (completed) {
+          lines.push(`  Last outcome: ${completed}`);
+        }
+      }
+    }
+
+    lines.push('');
+
+    if (observations.length === 0) {
+      lines.push('## Relevant Observations');
+      lines.push('');
+      lines.push('No matching observations found. Use `search` with a broader query if needed.');
+    } else {
+      lines.push('## Relevant Observations');
+      lines.push('');
+
+      for (const observation of observations) {
+        const title = observation.title || `Observation #${observation.id}`;
+        const subtitle = observation.subtitle ? ` | ${observation.subtitle}` : '';
+        lines.push(`- #${observation.id} | ${observation.type} | ${title}${subtitle}`);
+      }
+    }
+
+    if (recentDecisions.length > 0) {
+      lines.push('');
+      lines.push('## Decisions / Risks');
+      lines.push('');
+      for (const decision of recentDecisions) {
+        lines.push(`- #${decision.id} | ${decision.title || decision.narrative || 'Untitled'}`);
+      }
+    }
+
+    lines.push('');
+    lines.push('## Follow-up');
+    lines.push('');
+    if (observationIds.length > 0) {
+      lines.push(`Use \`timeline(anchor=${observationIds[0]})\` for context around the top hit.`);
+      lines.push(`Use \`get_observations(ids=[${observationIds.slice(0, Math.min(5, observationIds.length)).join(', ')}])\` to inspect the strongest matches.`);
+    } else {
+      lines.push('Use `search(query="...")` to broaden recall if the brief is empty.');
+    }
+
+    return {
+      content: [{
+        type: 'text' as const,
+        text: lines.join('\n')
+      }]
+    };
   }
 }

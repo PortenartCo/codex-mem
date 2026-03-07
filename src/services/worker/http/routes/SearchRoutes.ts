@@ -21,6 +21,7 @@ export class SearchRoutes extends BaseRouteHandler {
     // Unified endpoints (new consolidated API)
     app.get('/api/search', this.handleUnifiedSearch.bind(this));
     app.get('/api/timeline', this.handleUnifiedTimeline.bind(this));
+    app.get('/api/bootstrap-memory', this.handleBootstrapMemory.bind(this));
     app.get('/api/decisions', this.handleDecisions.bind(this));
     app.get('/api/changes', this.handleChanges.bind(this));
     app.get('/api/how-it-works', this.handleHowItWorks.bind(this));
@@ -59,6 +60,15 @@ export class SearchRoutes extends BaseRouteHandler {
    */
   private handleUnifiedTimeline = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
     const result = await this.searchManager.timeline(req.query);
+    res.json(result);
+  });
+
+  /**
+   * Compact project memory brief for startup / resume flows
+   * GET /api/bootstrap-memory?goal=...&project=...
+   */
+  private handleBootstrapMemory = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
+    const result = await this.searchManager.bootstrapMemory(req.query);
     res.json(result);
   });
 

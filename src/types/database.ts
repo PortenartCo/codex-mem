@@ -2,6 +2,14 @@
  * TypeScript types for database query results
  * Provides type safety for bun:sqlite query results
  */
+import type {
+  MemoryCaptureFidelity,
+  MemoryCaptureMode,
+  MemoryClientKind,
+  MemoryPlatform,
+  MemoryPrivacyState,
+  MemorySourceConfidence
+} from '../services/platform/types.js';
 
 /**
  * Schema information from sqlite3 PRAGMA table_info
@@ -56,6 +64,17 @@ export interface SdkSessionRecord {
   status: 'active' | 'completed' | 'failed';
   worker_port?: number;
   prompt_counter?: number;
+  custom_title?: string | null;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_session_id?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
 }
 
 /**
@@ -74,6 +93,22 @@ export interface ObservationRecord {
   source_files?: string;
   prompt_number?: number;
   discovery_tokens?: number;
+  uuid?: string | null;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  capture_fidelity?: MemoryCaptureFidelity;
+  raw_event_id?: number | null;
+  platform_session_id?: string | null;
+  platform_turn_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
+  superseded_by?: number | null;
+  staleness_score?: number;
 }
 
 /**
@@ -92,6 +127,22 @@ export interface SessionSummaryRecord {
   created_at_epoch: number;
   prompt_number?: number;
   discovery_tokens?: number;
+  uuid?: string | null;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  capture_fidelity?: MemoryCaptureFidelity;
+  raw_event_id?: number | null;
+  platform_session_id?: string | null;
+  platform_turn_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
+  superseded_by?: number | null;
+  staleness_score?: number;
 }
 
 /**
@@ -105,6 +156,17 @@ export interface UserPromptRecord {
   project?: string;  // From JOIN with sdk_sessions
   created_at: string;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_turn_id?: string | null;
+  raw_event_id?: number | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 /**
@@ -136,4 +198,37 @@ export interface ObservationWithContext {
   source_files?: string;
   prompt_number?: number;
   discovery_tokens?: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+}
+
+export interface RawEventRecord {
+  id: number;
+  event_uuid: string;
+  platform: MemoryPlatform;
+  client_kind: MemoryClientKind;
+  capture_mode: MemoryCaptureMode;
+  platform_session_id: string;
+  platform_turn_id: string | null;
+  item_id: string | null;
+  parent_session_id: string | null;
+  agent_role: string | null;
+  event_type: string;
+  cwd: string | null;
+  project: string | null;
+  repo_root: string | null;
+  repo_id: string | null;
+  git_branch: string | null;
+  git_commit: string | null;
+  payload_json: string;
+  payload_hash: string;
+  privacy_state: MemoryPrivacyState;
+  source_confidence: MemorySourceConfidence;
+  created_at: string;
+  created_at_epoch: number;
+  session_db_id: number | null;
 }

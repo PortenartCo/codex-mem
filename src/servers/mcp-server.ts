@@ -45,7 +45,8 @@ const WORKER_BASE_URL = `http://${WORKER_HOST}:${WORKER_PORT}`;
  */
 const TOOL_ENDPOINT_MAP: Record<string, string> = {
   'search': '/api/search',
-  'timeline': '/api/timeline'
+  'timeline': '/api/timeline',
+  'bootstrap_memory': '/api/bootstrap-memory'
 };
 
 /**
@@ -192,6 +193,19 @@ NEVER fetch full details without filtering first. 10x token savings.`,
 **Why:** 10x token savings. Never fetch full details without filtering first.`
       }]
     })
+  },
+  {
+    name: 'bootstrap_memory',
+    description: 'Step 0: Build a compact memory brief before deeper recall. Prefer cwd for repo-aware recall. Params: goal or query, cwd, repoRoot, repoId, project, limit, recent_limit',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: true
+    },
+    handler: async (args: any) => {
+      const endpoint = TOOL_ENDPOINT_MAP['bootstrap_memory'];
+      return await callWorkerAPI(endpoint, args);
+    }
   },
   {
     name: 'search',

@@ -3,6 +3,12 @@
  */
 
 import type { Response } from 'express';
+import type {
+  MemoryCaptureFidelity,
+  MemoryCaptureMode,
+  MemoryClientKind,
+  MemoryPlatform
+} from './platform/types.js';
 
 // ============================================================================
 // Active Session Types
@@ -22,6 +28,16 @@ export interface ActiveSession {
   contentSessionId: string;      // User's Claude Code session being observed
   memorySessionId: string | null; // Memory agent's session ID for resume
   project: string;
+  platform: MemoryPlatform;
+  clientKind: MemoryClientKind;
+  captureMode: MemoryCaptureMode;
+  platformSessionId: string;
+  parentSessionId?: string | null;
+  agentRole?: string | null;
+  repoRoot?: string | null;
+  repoId?: string | null;
+  gitBranch?: string | null;
+  gitCommit?: string | null;
   userPrompt: string;
   pendingMessages: PendingMessage[];  // Deprecated: now using persistent store, kept for compatibility
   abortController: AbortController;
@@ -50,12 +66,24 @@ export interface PendingMessage {
   prompt_number?: number;
   cwd?: string;
   last_assistant_message?: string;
+  raw_event_id?: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_turn_id?: string;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
+  source_event_epoch?: number;
 }
 
 /**
  * PendingMessage with database ID for completion tracking.
  * The _persistentId is used to mark the message as processed after SDK success.
- * The _originalTimestamp is the epoch when the message was first queued (for accurate observation timestamps).
+ * The _originalTimestamp is the source event epoch when available, otherwise the queue time.
  */
 export interface PendingMessageWithId extends PendingMessage {
   _persistentId: number;
@@ -68,6 +96,18 @@ export interface ObservationData {
   tool_response: any;
   prompt_number: number;
   cwd?: string;
+  raw_event_id?: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_turn_id?: string;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  git_commit?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
+  source_event_epoch?: number;
 }
 
 // ============================================================================
@@ -129,6 +169,16 @@ export interface Observation {
   prompt_number: number;
   created_at: string;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  capture_fidelity?: MemoryCaptureFidelity;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface Summary {
@@ -143,6 +193,16 @@ export interface Summary {
   notes: string | null;
   created_at: string;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  capture_fidelity?: MemoryCaptureFidelity;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface UserPrompt {
@@ -153,6 +213,15 @@ export interface UserPrompt {
   prompt_text: string;
   created_at: string;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_turn_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface DBSession {
@@ -161,6 +230,16 @@ export interface DBSession {
   project: string;
   user_prompt: string;
   memory_session_id: string | null;  // Renamed from sdk_session_id
+  platform: MemoryPlatform;
+  client_kind: MemoryClientKind;
+  capture_mode: MemoryCaptureMode;
+  platform_session_id: string | null;
+  parent_session_id: string | null;
+  agent_role: string | null;
+  repo_root: string | null;
+  repo_id: string | null;
+  git_branch: string | null;
+  git_commit: string | null;
   status: 'active' | 'completed' | 'failed';
   started_at: string;
   started_at_epoch: number;

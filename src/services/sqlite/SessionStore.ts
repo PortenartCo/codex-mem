@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { Database } from 'bun:sqlite';
 import { DATA_DIR, DB_PATH, ensureDir } from '../../shared/paths.js';
 import { logger } from '../../utils/logger.js';
@@ -10,10 +11,13 @@ import {
   ObservationRecord,
   SessionSummaryRecord,
   UserPromptRecord,
-  LatestPromptResult
+  LatestPromptResult,
+  RawEventRecord
 } from '../../types/database.js';
 import type { PendingMessageStore } from './PendingMessageStore.js';
 import { computeObservationContentHash, findDuplicateObservation } from './observations/store.js';
+import { MigrationRunner } from './migrations/runner.js';
+import type { NormalizedEvent, ProjectionMetadata, SessionMetadata } from '../platform/types.js';
 
 /**
  * Session data store for SDK sessions, observations, and summaries
@@ -33,24 +37,8 @@ export class SessionStore {
     this.db.run('PRAGMA synchronous = NORMAL');
     this.db.run('PRAGMA foreign_keys = ON');
 
-    // Initialize schema if needed (fresh database)
-    this.initializeSchema();
-
-    // Run migrations
-    this.ensureWorkerPortColumn();
-    this.ensurePromptTrackingColumns();
-    this.removeSessionSummariesUniqueConstraint();
-    this.addObservationHierarchicalFields();
-    this.makeObservationsTextNullable();
-    this.createUserPromptsTable();
-    this.ensureDiscoveryTokensColumn();
-    this.createPendingMessagesTable();
-    this.renameSessionIdColumns();
-    this.repairSessionIdColumnRename();
-    this.addFailedAtEpochColumn();
-    this.addOnUpdateCascadeToForeignKeys();
-    this.addObservationContentHashColumn();
-    this.addSessionCustomTitleColumn();
+    const migrationRunner = new MigrationRunner(this.db);
+    migrationRunner.runAllMigrations();
   }
 
   /**
@@ -1120,13 +1108,36 @@ export class SessionStore {
   /**
    * Get recent sessions with their status and summary info
    */
-  getRecentSessionsWithStatus(project: string, limit: number = 3): Array<{
+  getRecentSessionsWithStatus(
+    project: string,
+    limit: number = 3,
+    filters: { repoRoot?: string | null; repoId?: string | null } = {}
+  ): Array<{
     memory_session_id: string | null;
     status: string;
     started_at: string;
     user_prompt: string | null;
     has_summary: boolean;
   }> {
+    let scopeClause = 's.project = ?';
+    const params: Array<string | number> = [];
+
+    if (filters.repoId) {
+      scopeClause = `
+        (
+          s.repo_id = ?
+          OR (s.repo_id IS NULL AND s.repo_root = ?)
+          OR (s.repo_id IS NULL AND s.repo_root IS NULL AND s.project = ?)
+        )
+      `;
+      params.push(filters.repoId, filters.repoRoot || '', project);
+    } else if (filters.repoRoot) {
+      scopeClause = '(s.repo_root = ? OR (s.repo_root IS NULL AND s.project = ?))';
+      params.push(filters.repoRoot, project);
+    } else {
+      params.push(project);
+    }
+
     const stmt = this.db.prepare(`
       SELECT * FROM (
         SELECT
@@ -1138,7 +1149,7 @@ export class SessionStore {
           CASE WHEN sum.memory_session_id IS NOT NULL THEN 1 ELSE 0 END as has_summary
         FROM sdk_sessions s
         LEFT JOIN session_summaries sum ON s.memory_session_id = sum.memory_session_id
-        WHERE s.project = ? AND s.memory_session_id IS NOT NULL
+        WHERE ${scopeClause} AND s.memory_session_id IS NOT NULL
         GROUP BY s.memory_session_id
         ORDER BY s.started_at_epoch DESC
         LIMIT ?
@@ -1146,7 +1157,7 @@ export class SessionStore {
       ORDER BY started_at_epoch ASC
     `);
 
-    return stmt.all(project, limit);
+    return stmt.all(...params, limit);
   }
 
   /**
@@ -1186,11 +1197,20 @@ export class SessionStore {
    */
   getObservationsByIds(
     ids: number[],
-    options: { orderBy?: 'date_desc' | 'date_asc'; limit?: number; project?: string; type?: string | string[]; concepts?: string | string[]; files?: string | string[] } = {}
+    options: {
+      orderBy?: 'date_desc' | 'date_asc';
+      limit?: number;
+      project?: string;
+      repoRoot?: string;
+      repoId?: string;
+      type?: string | string[];
+      concepts?: string | string[];
+      files?: string | string[];
+    } = {}
   ): ObservationRecord[] {
     if (ids.length === 0) return [];
 
-    const { orderBy = 'date_desc', limit, project, type, concepts, files } = options;
+    const { orderBy = 'date_desc', limit, project, repoRoot, repoId, type, concepts, files } = options;
     const orderClause = orderBy === 'date_asc' ? 'ASC' : 'DESC';
     const limitClause = limit ? `LIMIT ${limit}` : '';
 
@@ -1199,8 +1219,18 @@ export class SessionStore {
     const params: any[] = [...ids];
     const additionalConditions: string[] = [];
 
-    // Apply project filter
-    if (project) {
+    // Apply repo-aware scoping with graceful fallback for older rows.
+    if (repoId) {
+      additionalConditions.push(`(
+        repo_id = ?
+        OR (repo_id IS NULL AND repo_root = ?)
+        OR (repo_id IS NULL AND repo_root IS NULL AND project = ?)
+      )`);
+      params.push(repoId, repoRoot || '', project || '');
+    } else if (repoRoot) {
+      additionalConditions.push('(repo_root = ? OR (repo_root IS NULL AND project = ?))');
+      params.push(repoRoot, project || '');
+    } else if (project) {
       additionalConditions.push('project = ?');
       params.push(project);
     }
@@ -1339,9 +1369,21 @@ export class SessionStore {
     project: string;
     user_prompt: string;
     custom_title: string | null;
+    platform: string;
+    client_kind: string;
+    capture_mode: string;
+    platform_session_id: string | null;
+    parent_session_id: string | null;
+    agent_role: string | null;
+    repo_root: string | null;
+    repo_id: string | null;
+    git_branch: string | null;
+    git_commit: string | null;
   } | null {
     const stmt = this.db.prepare(`
-      SELECT id, content_session_id, memory_session_id, project, user_prompt, custom_title
+      SELECT id, content_session_id, memory_session_id, project, user_prompt, custom_title,
+             platform, client_kind, capture_mode, platform_session_id, parent_session_id,
+             agent_role, repo_root, repo_id, git_branch, git_commit
       FROM sdk_sessions
       WHERE id = ?
       LIMIT 1
@@ -1361,6 +1403,16 @@ export class SessionStore {
     project: string;
     user_prompt: string;
     custom_title: string | null;
+    platform: string;
+    client_kind: string;
+    capture_mode: string;
+    platform_session_id: string | null;
+    parent_session_id: string | null;
+    agent_role: string | null;
+    repo_root: string | null;
+    repo_id: string | null;
+    git_branch: string | null;
+    git_commit: string | null;
     started_at: string;
     started_at_epoch: number;
     completed_at: string | null;
@@ -1372,6 +1424,8 @@ export class SessionStore {
     const placeholders = memorySessionIds.map(() => '?').join(',');
     const stmt = this.db.prepare(`
       SELECT id, content_session_id, memory_session_id, project, user_prompt, custom_title,
+             platform, client_kind, capture_mode, platform_session_id, parent_session_id,
+             agent_role, repo_root, repo_id, git_branch, git_commit,
              started_at, started_at_epoch, completed_at, completed_at_epoch, status
       FROM sdk_sessions
       WHERE memory_session_id IN (${placeholders})
@@ -1397,6 +1451,70 @@ export class SessionStore {
     return result.count;
   }
 
+  private normalizeMetadataValue(value: string | null | undefined): string | null {
+    if (value === undefined || value === null) return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+  }
+
+  private updateSessionMetadata(contentSessionId: string, metadata?: Partial<SessionMetadata>): void {
+    if (!metadata) return;
+
+    this.db.prepare(`
+      UPDATE sdk_sessions
+      SET
+        platform = COALESCE(?, platform),
+        client_kind = COALESCE(?, client_kind),
+        capture_mode = COALESCE(?, capture_mode),
+        platform_session_id = COALESCE(?, platform_session_id),
+        parent_session_id = COALESCE(?, parent_session_id),
+        agent_role = COALESCE(?, agent_role),
+        repo_root = COALESCE(?, repo_root),
+        repo_id = COALESCE(?, repo_id),
+        git_branch = COALESCE(?, git_branch),
+        git_commit = COALESCE(?, git_commit)
+      WHERE content_session_id = ?
+    `).run(
+      metadata.platform || null,
+      metadata.clientKind || null,
+      metadata.captureMode || null,
+      this.normalizeMetadataValue(metadata.platformSessionId) || contentSessionId,
+      this.normalizeMetadataValue(metadata.parentSessionId),
+      this.normalizeMetadataValue(metadata.agentRole),
+      this.normalizeMetadataValue(metadata.repoRoot),
+      this.normalizeMetadataValue(metadata.repoId),
+      this.normalizeMetadataValue(metadata.gitBranch),
+      this.normalizeMetadataValue(metadata.gitCommit),
+      contentSessionId
+    );
+  }
+
+  markSessionCompleted(sessionDbId: number, completedAtEpoch: number = Date.now()): boolean {
+    const completedAt = new Date(completedAtEpoch).toISOString();
+    const result = this.db.prepare(`
+      UPDATE sdk_sessions
+      SET
+        completed_at = CASE
+          WHEN completed_at_epoch IS NULL OR completed_at_epoch < ? THEN ?
+          ELSE completed_at
+        END,
+        completed_at_epoch = CASE
+          WHEN completed_at_epoch IS NULL OR completed_at_epoch < ? THEN ?
+          ELSE completed_at_epoch
+        END,
+        status = 'completed'
+      WHERE id = ?
+    `).run(
+      completedAtEpoch,
+      completedAt,
+      completedAtEpoch,
+      completedAtEpoch,
+      sessionDbId
+    );
+
+    return result.changes > 0;
+  }
+
   /**
    * Create a new SDK session (idempotent - returns existing session ID if already exists)
    *
@@ -1416,9 +1534,16 @@ export class SessionStore {
    * Pure get-or-create: never modifies memory_session_id.
    * Multi-terminal isolation is handled by ON UPDATE CASCADE at the schema level.
    */
-  createSDKSession(contentSessionId: string, project: string, userPrompt: string, customTitle?: string): number {
-    const now = new Date();
-    const nowEpoch = now.getTime();
+  createSDKSession(
+    contentSessionId: string,
+    project: string,
+    userPrompt: string,
+    customTitle?: string,
+    metadata?: Partial<SessionMetadata>,
+    overrideStartedAtEpoch?: number
+  ): number {
+    const startedAtEpoch = overrideStartedAtEpoch ?? Date.now();
+    const startedAtIso = new Date(startedAtEpoch).toISOString();
 
     // Session reuse: Return existing session ID if already created for this contentSessionId.
     const existing = this.db.prepare(`
@@ -1440,6 +1565,28 @@ export class SessionStore {
           WHERE content_session_id = ? AND custom_title IS NULL
         `).run(customTitle, contentSessionId);
       }
+      if (overrideStartedAtEpoch !== undefined) {
+        this.db.prepare(`
+          UPDATE sdk_sessions
+          SET
+            started_at = CASE
+              WHEN started_at_epoch IS NULL OR started_at_epoch > ? THEN ?
+              ELSE started_at
+            END,
+            started_at_epoch = CASE
+              WHEN started_at_epoch IS NULL OR started_at_epoch > ? THEN ?
+              ELSE started_at_epoch
+            END
+          WHERE content_session_id = ?
+        `).run(
+          overrideStartedAtEpoch,
+          startedAtIso,
+          overrideStartedAtEpoch,
+          overrideStartedAtEpoch,
+          contentSessionId
+        );
+      }
+      this.updateSessionMetadata(contentSessionId, metadata);
       return existing.id;
     }
 
@@ -1449,9 +1596,31 @@ export class SessionStore {
     // must NEVER equal contentSessionId - that would inject memory messages into the user's transcript!
     this.db.prepare(`
       INSERT INTO sdk_sessions
-      (content_session_id, memory_session_id, project, user_prompt, custom_title, started_at, started_at_epoch, status)
-      VALUES (?, NULL, ?, ?, ?, ?, ?, 'active')
-    `).run(contentSessionId, project, userPrompt, customTitle || null, now.toISOString(), nowEpoch);
+      (
+        content_session_id, memory_session_id, project, user_prompt, custom_title,
+        platform, client_kind, capture_mode, platform_session_id, parent_session_id, agent_role,
+        repo_root, repo_id, git_branch, git_commit,
+        started_at, started_at_epoch, status
+      )
+      VALUES (?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+    `).run(
+      contentSessionId,
+      project,
+      userPrompt,
+      customTitle || null,
+      metadata?.platform || 'claude',
+      metadata?.clientKind || 'claude-code',
+      metadata?.captureMode || 'hook',
+      this.normalizeMetadataValue(metadata?.platformSessionId) || contentSessionId,
+      this.normalizeMetadataValue(metadata?.parentSessionId),
+      this.normalizeMetadataValue(metadata?.agentRole),
+      this.normalizeMetadataValue(metadata?.repoRoot),
+      this.normalizeMetadataValue(metadata?.repoId),
+      this.normalizeMetadataValue(metadata?.gitBranch),
+      this.normalizeMetadataValue(metadata?.gitCommit),
+      startedAtIso,
+      startedAtEpoch
+    );
 
     // Return new ID
     const row = this.db.prepare('SELECT id FROM sdk_sessions WHERE content_session_id = ?')
@@ -1465,18 +1634,146 @@ export class SessionStore {
   /**
    * Save a user prompt
    */
-  saveUserPrompt(contentSessionId: string, promptNumber: number, promptText: string): number {
-    const now = new Date();
-    const nowEpoch = now.getTime();
+  saveUserPrompt(
+    contentSessionId: string,
+    promptNumber: number,
+    promptText: string,
+    metadata?: Partial<ProjectionMetadata>,
+    overrideCreatedAtEpoch?: number
+  ): number {
+    const createdAtEpoch = overrideCreatedAtEpoch ?? Date.now();
+    const createdAtIso = new Date(createdAtEpoch).toISOString();
 
     const stmt = this.db.prepare(`
       INSERT INTO user_prompts
-      (content_session_id, prompt_number, prompt_text, created_at, created_at_epoch)
-      VALUES (?, ?, ?, ?, ?)
+      (
+        content_session_id, prompt_number, prompt_text,
+        platform, client_kind, capture_mode, platform_turn_id, raw_event_id,
+        repo_root, repo_id, git_branch, git_commit, parent_session_id, agent_role,
+        created_at, created_at_epoch
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const result = stmt.run(contentSessionId, promptNumber, promptText, now.toISOString(), nowEpoch);
+    const result = stmt.run(
+      contentSessionId,
+      promptNumber,
+      promptText,
+      metadata?.platform || 'claude',
+      metadata?.clientKind || 'claude-code',
+      metadata?.captureMode || 'hook',
+      this.normalizeMetadataValue(metadata?.platformTurnId),
+      metadata?.rawEventId || null,
+      this.normalizeMetadataValue(metadata?.repoRoot),
+      this.normalizeMetadataValue(metadata?.repoId),
+      this.normalizeMetadataValue(metadata?.gitBranch),
+      this.normalizeMetadataValue(metadata?.gitCommit),
+      this.normalizeMetadataValue(metadata?.parentSessionId),
+      this.normalizeMetadataValue(metadata?.agentRole),
+      createdAtIso,
+      createdAtEpoch
+    );
     return result.lastInsertRowid as number;
+  }
+
+  storeRawEvent(event: NormalizedEvent, sessionDbId?: number | null): { id: number; inserted: boolean } {
+    const existing = this.db.prepare(`
+      SELECT id FROM raw_events WHERE payload_hash = ? LIMIT 1
+    `).get(event.payloadHash) as { id: number } | undefined;
+
+    if (existing) {
+      return { id: existing.id, inserted: false };
+    }
+
+    const createdAt = new Date(event.createdAtEpochMs).toISOString();
+    const stmt = this.db.prepare(`
+      INSERT INTO raw_events (
+        event_uuid, platform, client_kind, capture_mode,
+        platform_session_id, platform_turn_id, item_id, parent_session_id, agent_role,
+        event_type, cwd, project, repo_root, repo_id, git_branch, git_commit,
+        payload_json, payload_hash, privacy_state, source_confidence,
+        created_at, created_at_epoch, session_db_id
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const result = stmt.run(
+      event.id,
+      event.platform,
+      event.clientKind,
+      event.captureMode,
+      event.platformSessionId,
+      this.normalizeMetadataValue(event.platformTurnId),
+      this.normalizeMetadataValue(event.itemId),
+      this.normalizeMetadataValue(event.parentSessionId),
+      this.normalizeMetadataValue(event.agentRole),
+      event.eventType,
+      this.normalizeMetadataValue(event.cwd),
+      this.normalizeMetadataValue(event.project),
+      this.normalizeMetadataValue(event.repoRoot),
+      this.normalizeMetadataValue(event.repoId),
+      this.normalizeMetadataValue(event.gitBranch),
+      this.normalizeMetadataValue(event.gitCommit),
+      event.payloadJson,
+      event.payloadHash,
+      event.privacyState,
+      event.sourceConfidence,
+      createdAt,
+      event.createdAtEpochMs,
+      sessionDbId || null
+    );
+
+    return { id: Number(result.lastInsertRowid), inserted: true };
+  }
+
+  storeRawEvents(events: NormalizedEvent[], sessionDbId?: number | null): Array<{ id: number; inserted: boolean }> {
+    return events.map(event => this.storeRawEvent(event, sessionDbId));
+  }
+
+  listRawEvents(filters: {
+    platformSessionId?: string;
+    platform?: string;
+    eventType?: string;
+    repoId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): RawEventRecord[] {
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+
+    if (filters.platformSessionId) {
+      clauses.push('platform_session_id = ?');
+      params.push(filters.platformSessionId);
+    }
+    if (filters.platform) {
+      clauses.push('platform = ?');
+      params.push(filters.platform);
+    }
+    if (filters.eventType) {
+      clauses.push('event_type = ?');
+      params.push(filters.eventType);
+    }
+    if (filters.repoId) {
+      clauses.push('repo_id = ?');
+      params.push(filters.repoId);
+    }
+
+    const whereClause = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+    const limit = filters.limit ?? 100;
+    const offset = filters.offset ?? 0;
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM raw_events
+      ${whereClause}
+      ORDER BY created_at_epoch DESC, id DESC
+      LIMIT ? OFFSET ?
+    `);
+
+    return stmt.all(...params, limit, offset) as RawEventRecord[];
+  }
+
+  getRawEventReplay(platformSessionId: string, limit: number = 200): RawEventRecord[] {
+    return this.listRawEvents({ platformSessionId, limit });
   }
 
   /**
@@ -1515,7 +1812,8 @@ export class SessionStore {
     },
     promptNumber?: number,
     discoveryTokens: number = 0,
-    overrideTimestampEpoch?: number
+    overrideTimestampEpoch?: number,
+    metadata?: Partial<ProjectionMetadata>
   ): { id: number; createdAtEpoch: number } {
     // Use override timestamp if provided (for processing backlog messages with original timestamps)
     const timestampEpoch = overrideTimestampEpoch ?? Date.now();
@@ -1530,9 +1828,15 @@ export class SessionStore {
 
     const stmt = this.db.prepare(`
       INSERT INTO observations
-      (memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
-       files_read, files_modified, prompt_number, discovery_tokens, content_hash, created_at, created_at_epoch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (
+        memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
+        files_read, files_modified, prompt_number, discovery_tokens, content_hash,
+        uuid, platform, client_kind, capture_mode, capture_fidelity, raw_event_id,
+        platform_session_id, platform_turn_id, repo_root, repo_id, git_branch, git_commit,
+        parent_session_id, agent_role, superseded_by, staleness_score,
+        created_at, created_at_epoch
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -1549,6 +1853,22 @@ export class SessionStore {
       promptNumber || null,
       discoveryTokens,
       contentHash,
+      randomUUID(),
+      metadata?.platform || 'claude',
+      metadata?.clientKind || 'claude-code',
+      metadata?.captureMode || 'hook',
+      metadata?.captureFidelity || 'high',
+      metadata?.rawEventId || null,
+      this.normalizeMetadataValue(metadata?.platformSessionId),
+      this.normalizeMetadataValue(metadata?.platformTurnId),
+      this.normalizeMetadataValue(metadata?.repoRoot),
+      this.normalizeMetadataValue(metadata?.repoId),
+      this.normalizeMetadataValue(metadata?.gitBranch),
+      this.normalizeMetadataValue(metadata?.gitCommit),
+      this.normalizeMetadataValue(metadata?.parentSessionId),
+      this.normalizeMetadataValue(metadata?.agentRole),
+      metadata?.supersededBy || null,
+      metadata?.stalenessScore ?? 0,
       timestampIso,
       timestampEpoch
     );
@@ -1576,7 +1896,8 @@ export class SessionStore {
     },
     promptNumber?: number,
     discoveryTokens: number = 0,
-    overrideTimestampEpoch?: number
+    overrideTimestampEpoch?: number,
+    metadata?: Partial<ProjectionMetadata>
   ): { id: number; createdAtEpoch: number } {
     // Use override timestamp if provided (for processing backlog messages with original timestamps)
     const timestampEpoch = overrideTimestampEpoch ?? Date.now();
@@ -1584,9 +1905,15 @@ export class SessionStore {
 
     const stmt = this.db.prepare(`
       INSERT INTO session_summaries
-      (memory_session_id, project, request, investigated, learned, completed,
-       next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (
+        memory_session_id, project, request, investigated, learned, completed,
+        next_steps, notes, prompt_number, discovery_tokens,
+        uuid, platform, client_kind, capture_mode, capture_fidelity, raw_event_id,
+        platform_session_id, platform_turn_id, repo_root, repo_id, git_branch, git_commit,
+        parent_session_id, agent_role, superseded_by, staleness_score,
+        created_at, created_at_epoch
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -1600,6 +1927,22 @@ export class SessionStore {
       summary.notes,
       promptNumber || null,
       discoveryTokens,
+      randomUUID(),
+      metadata?.platform || 'claude',
+      metadata?.clientKind || 'claude-code',
+      metadata?.captureMode || 'hook',
+      metadata?.captureFidelity || 'high',
+      metadata?.rawEventId || null,
+      this.normalizeMetadataValue(metadata?.platformSessionId),
+      this.normalizeMetadataValue(metadata?.platformTurnId),
+      this.normalizeMetadataValue(metadata?.repoRoot),
+      this.normalizeMetadataValue(metadata?.repoId),
+      this.normalizeMetadataValue(metadata?.gitBranch),
+      this.normalizeMetadataValue(metadata?.gitCommit),
+      this.normalizeMetadataValue(metadata?.parentSessionId),
+      this.normalizeMetadataValue(metadata?.agentRole),
+      metadata?.supersededBy || null,
+      metadata?.stalenessScore ?? 0,
       timestampIso,
       timestampEpoch
     );
@@ -1649,7 +1992,8 @@ export class SessionStore {
     } | null,
     promptNumber?: number,
     discoveryTokens: number = 0,
-    overrideTimestampEpoch?: number
+    overrideTimestampEpoch?: number,
+    metadata?: Partial<ProjectionMetadata>
   ): { observationIds: number[]; summaryId: number | null; createdAtEpoch: number } {
     // Use override timestamp if provided
     const timestampEpoch = overrideTimestampEpoch ?? Date.now();
@@ -1662,9 +2006,15 @@ export class SessionStore {
       // 1. Store all observations
       const obsStmt = this.db.prepare(`
         INSERT INTO observations
-        (memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
-         files_read, files_modified, prompt_number, discovery_tokens, created_at, created_at_epoch)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (
+          memory_session_id, project, type, title, subtitle, facts, narrative, concepts,
+          files_read, files_modified, prompt_number, discovery_tokens,
+          uuid, platform, client_kind, capture_mode, capture_fidelity, raw_event_id,
+          platform_session_id, platform_turn_id, repo_root, repo_id, git_branch, git_commit,
+          parent_session_id, agent_role, superseded_by, staleness_score,
+          created_at, created_at_epoch
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       for (const observation of observations) {
@@ -1681,6 +2031,22 @@ export class SessionStore {
           JSON.stringify(observation.files_modified),
           promptNumber || null,
           discoveryTokens,
+          randomUUID(),
+          metadata?.platform || 'claude',
+          metadata?.clientKind || 'claude-code',
+          metadata?.captureMode || 'hook',
+          metadata?.captureFidelity || 'high',
+          metadata?.rawEventId || null,
+          this.normalizeMetadataValue(metadata?.platformSessionId),
+          this.normalizeMetadataValue(metadata?.platformTurnId),
+          this.normalizeMetadataValue(metadata?.repoRoot),
+          this.normalizeMetadataValue(metadata?.repoId),
+          this.normalizeMetadataValue(metadata?.gitBranch),
+          this.normalizeMetadataValue(metadata?.gitCommit),
+          this.normalizeMetadataValue(metadata?.parentSessionId),
+          this.normalizeMetadataValue(metadata?.agentRole),
+          metadata?.supersededBy || null,
+          metadata?.stalenessScore ?? 0,
           timestampIso,
           timestampEpoch
         );
@@ -1692,9 +2058,15 @@ export class SessionStore {
       if (summary) {
         const summaryStmt = this.db.prepare(`
           INSERT INTO session_summaries
-          (memory_session_id, project, request, investigated, learned, completed,
-           next_steps, notes, prompt_number, discovery_tokens, created_at, created_at_epoch)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          (
+            memory_session_id, project, request, investigated, learned, completed,
+            next_steps, notes, prompt_number, discovery_tokens,
+            uuid, platform, client_kind, capture_mode, capture_fidelity, raw_event_id,
+            platform_session_id, platform_turn_id, repo_root, repo_id, git_branch, git_commit,
+            parent_session_id, agent_role, superseded_by, staleness_score,
+            created_at, created_at_epoch
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         const result = summaryStmt.run(
@@ -1708,6 +2080,22 @@ export class SessionStore {
           summary.notes,
           promptNumber || null,
           discoveryTokens,
+          randomUUID(),
+          metadata?.platform || 'claude',
+          metadata?.clientKind || 'claude-code',
+          metadata?.captureMode || 'hook',
+          metadata?.captureFidelity || 'high',
+          metadata?.rawEventId || null,
+          this.normalizeMetadataValue(metadata?.platformSessionId),
+          this.normalizeMetadataValue(metadata?.platformTurnId),
+          this.normalizeMetadataValue(metadata?.repoRoot),
+          this.normalizeMetadataValue(metadata?.repoId),
+          this.normalizeMetadataValue(metadata?.gitBranch),
+          this.normalizeMetadataValue(metadata?.gitCommit),
+          this.normalizeMetadataValue(metadata?.parentSessionId),
+          this.normalizeMetadataValue(metadata?.agentRole),
+          metadata?.supersededBy || null,
+          metadata?.stalenessScore ?? 0,
           timestampIso,
           timestampEpoch
         );
@@ -1868,21 +2256,41 @@ export class SessionStore {
    */
   getSessionSummariesByIds(
     ids: number[],
-    options: { orderBy?: 'date_desc' | 'date_asc'; limit?: number; project?: string } = {}
+    options: {
+      orderBy?: 'date_desc' | 'date_asc';
+      limit?: number;
+      project?: string;
+      repoRoot?: string;
+      repoId?: string;
+    } = {}
   ): SessionSummaryRecord[] {
     if (ids.length === 0) return [];
 
-    const { orderBy = 'date_desc', limit, project } = options;
+    const { orderBy = 'date_desc', limit, project, repoRoot, repoId } = options;
     const orderClause = orderBy === 'date_asc' ? 'ASC' : 'DESC';
     const limitClause = limit ? `LIMIT ${limit}` : '';
     const placeholders = ids.map(() => '?').join(',');
     const params: any[] = [...ids];
 
-    // Apply project filter
-    const whereClause = project
-      ? `WHERE id IN (${placeholders}) AND project = ?`
+    const scopeConditions: string[] = [];
+    if (repoId) {
+      scopeConditions.push(`(
+        repo_id = ?
+        OR (repo_id IS NULL AND repo_root = ?)
+        OR (repo_id IS NULL AND repo_root IS NULL AND project = ?)
+      )`);
+      params.push(repoId, repoRoot || '', project || '');
+    } else if (repoRoot) {
+      scopeConditions.push('(repo_root = ? OR (repo_root IS NULL AND project = ?))');
+      params.push(repoRoot, project || '');
+    } else if (project) {
+      scopeConditions.push('project = ?');
+      params.push(project);
+    }
+
+    const whereClause = scopeConditions.length > 0
+      ? `WHERE id IN (${placeholders}) AND ${scopeConditions.join(' AND ')}`
       : `WHERE id IN (${placeholders})`;
-    if (project) params.push(project);
 
     const stmt = this.db.prepare(`
       SELECT * FROM session_summaries
@@ -1900,19 +2308,41 @@ export class SessionStore {
    */
   getUserPromptsByIds(
     ids: number[],
-    options: { orderBy?: 'date_desc' | 'date_asc'; limit?: number; project?: string } = {}
+    options: {
+      orderBy?: 'date_desc' | 'date_asc';
+      limit?: number;
+      project?: string;
+      repoRoot?: string;
+      repoId?: string;
+    } = {}
   ): UserPromptRecord[] {
     if (ids.length === 0) return [];
 
-    const { orderBy = 'date_desc', limit, project } = options;
+    const { orderBy = 'date_desc', limit, project, repoRoot, repoId } = options;
     const orderClause = orderBy === 'date_asc' ? 'ASC' : 'DESC';
     const limitClause = limit ? `LIMIT ${limit}` : '';
     const placeholders = ids.map(() => '?').join(',');
     const params: any[] = [...ids];
 
-    // Apply project filter
-    const projectFilter = project ? 'AND s.project = ?' : '';
-    if (project) params.push(project);
+    const scopeConditions: string[] = [];
+    if (repoId) {
+      scopeConditions.push(`(
+        s.repo_id = ?
+        OR (s.repo_id IS NULL AND s.repo_root = ?)
+        OR (s.repo_id IS NULL AND s.repo_root IS NULL AND s.project = ?)
+      )`);
+      params.push(repoId, repoRoot || '', project || '');
+    } else if (repoRoot) {
+      scopeConditions.push('(s.repo_root = ? OR (s.repo_root IS NULL AND s.project = ?))');
+      params.push(repoRoot, project || '');
+    } else if (project) {
+      scopeConditions.push('s.project = ?');
+      params.push(project);
+    }
+
+    const whereClause = scopeConditions.length > 0
+      ? `WHERE up.id IN (${placeholders}) AND ${scopeConditions.join(' AND ')}`
+      : `WHERE up.id IN (${placeholders})`;
 
     const stmt = this.db.prepare(`
       SELECT
@@ -1921,7 +2351,7 @@ export class SessionStore {
         s.memory_session_id
       FROM user_prompts up
       JOIN sdk_sessions s ON up.content_session_id = s.content_session_id
-      WHERE up.id IN (${placeholders}) ${projectFilter}
+      ${whereClause}
       ORDER BY up.created_at_epoch ${orderClause}
       ${limitClause}
     `);

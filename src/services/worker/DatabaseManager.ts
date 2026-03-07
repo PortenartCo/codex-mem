@@ -102,6 +102,16 @@ export class DatabaseManager {
     memory_session_id: string | null;
     project: string;
     user_prompt: string;
+    platform: string;
+    client_kind: string;
+    capture_mode: string;
+    platform_session_id: string | null;
+    parent_session_id: string | null;
+    agent_role: string | null;
+    repo_root: string | null;
+    repo_id: string | null;
+    git_branch: string | null;
+    git_commit: string | null;
   } {
     const session = this.getSessionStore().getSessionById(sessionDbId);
     if (!session) {

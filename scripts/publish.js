@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Release script for claude-mem
+ * Release script for codex-mem
  * Handles version bumping, building, and creating marketplace releases
  */
 
@@ -21,7 +21,7 @@ const question = (query) => new Promise((resolve) => rl.question(query, resolve)
 
 async function publish() {
   try {
-    console.log('📦 Claude-mem Marketplace Release Tool\n');
+    console.log('📦 Codex-mem Release Tool\n');
 
     // Check git status
     console.log('🔍 Checking git status...');
@@ -120,7 +120,7 @@ async function publish() {
     await execAsync(`git commit -m "chore: Release v${newVersion}
 
 Marketplace release for Claude Code plugin
-https://github.com/thedotmack/claude-mem"`);
+https://github.com/KeystoneScience/codex-mem"`);
     await execAsync(`git tag v${newVersion}`);
     console.log(`✓ Created commit and tag v${newVersion}`);
 
@@ -131,7 +131,7 @@ https://github.com/thedotmack/claude-mem"`);
     console.log('✓ Pushed to git');
 
     console.log(`\n✅ Successfully released v${newVersion}! 🎉`);
-    console.log(`\n🏷️  Tag: https://github.com/thedotmack/claude-mem/releases/tag/v${newVersion}`);
+    console.log(`\n🏷️  Tag: https://github.com/KeystoneScience/codex-mem/releases/tag/v${newVersion}`);
     console.log(`📦 Marketplace will sync from this tag automatically`);
 
   } catch (error) {

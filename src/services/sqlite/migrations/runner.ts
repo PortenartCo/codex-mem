@@ -34,6 +34,12 @@ export class MigrationRunner {
     this.addOnUpdateCascadeToForeignKeys();
     this.addObservationContentHashColumn();
     this.addSessionCustomTitleColumn();
+    this.addSessionPlatformMetadataColumns();
+    this.createRawEventsTable();
+    this.addProjectionMetadataColumns();
+    this.addPendingMessageEventColumns();
+    this.createMemoryProjectionsTable();
+    this.createRetrievalFeedbackTable();
   }
 
   /**
@@ -858,5 +864,311 @@ export class MigrationRunner {
     }
 
     this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(23, new Date().toISOString());
+  }
+
+  /**
+   * Add platform-neutral session metadata columns (migration 24)
+   */
+  private addSessionPlatformMetadataColumns(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(24) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.ensureColumn('sdk_sessions', 'platform', "TEXT NOT NULL DEFAULT 'claude'");
+    this.ensureColumn('sdk_sessions', 'client_kind', "TEXT NOT NULL DEFAULT 'claude-code'");
+    this.ensureColumn('sdk_sessions', 'capture_mode', "TEXT NOT NULL DEFAULT 'hook'");
+    this.ensureColumn('sdk_sessions', 'platform_session_id', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'parent_session_id', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'agent_role', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'repo_root', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'repo_id', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'git_branch', 'TEXT');
+    this.ensureColumn('sdk_sessions', 'git_commit', 'TEXT');
+
+    this.db.run(`
+      UPDATE sdk_sessions
+      SET platform_session_id = content_session_id
+      WHERE platform_session_id IS NULL OR platform_session_id = ''
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_sdk_sessions_platform ON sdk_sessions(platform)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_sdk_sessions_platform_session ON sdk_sessions(platform_session_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_sdk_sessions_parent_session ON sdk_sessions(parent_session_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_sdk_sessions_repo_id ON sdk_sessions(repo_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_sdk_sessions_git_branch ON sdk_sessions(git_branch)');
+
+    this.recordMigration(24);
+  }
+
+  /**
+   * Create the raw event log table (migration 25)
+   */
+  private createRawEventsTable(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(25) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS raw_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_uuid TEXT UNIQUE NOT NULL,
+        platform TEXT NOT NULL,
+        client_kind TEXT NOT NULL,
+        capture_mode TEXT NOT NULL,
+        platform_session_id TEXT NOT NULL,
+        platform_turn_id TEXT,
+        item_id TEXT,
+        parent_session_id TEXT,
+        agent_role TEXT,
+        event_type TEXT NOT NULL,
+        cwd TEXT,
+        project TEXT,
+        repo_root TEXT,
+        repo_id TEXT,
+        git_branch TEXT,
+        git_commit TEXT,
+        payload_json TEXT NOT NULL,
+        payload_hash TEXT UNIQUE NOT NULL,
+        privacy_state TEXT NOT NULL DEFAULT 'normal',
+        source_confidence TEXT NOT NULL DEFAULT 'high',
+        created_at TEXT NOT NULL,
+        created_at_epoch INTEGER NOT NULL,
+        session_db_id INTEGER,
+        FOREIGN KEY(session_db_id) REFERENCES sdk_sessions(id) ON DELETE SET NULL
+      )
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_platform_session ON raw_events(platform_session_id, created_at_epoch DESC)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_turn ON raw_events(platform_turn_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_parent_session ON raw_events(parent_session_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_event_type ON raw_events(event_type)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_repo_id ON raw_events(repo_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_raw_events_created ON raw_events(created_at_epoch DESC)');
+
+    this.recordMigration(25);
+  }
+
+  /**
+   * Add generic metadata columns to projection tables (migration 26)
+   */
+  private addProjectionMetadataColumns(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(26) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.ensureColumn('observations', 'uuid', 'TEXT');
+    this.ensureColumn('observations', 'platform', "TEXT NOT NULL DEFAULT 'claude'");
+    this.ensureColumn('observations', 'client_kind', "TEXT NOT NULL DEFAULT 'claude-code'");
+    this.ensureColumn('observations', 'capture_mode', "TEXT NOT NULL DEFAULT 'hook'");
+    this.ensureColumn('observations', 'capture_fidelity', "TEXT NOT NULL DEFAULT 'high'");
+    this.ensureColumn('observations', 'raw_event_id', 'INTEGER');
+    this.ensureColumn('observations', 'platform_session_id', 'TEXT');
+    this.ensureColumn('observations', 'platform_turn_id', 'TEXT');
+    this.ensureColumn('observations', 'repo_root', 'TEXT');
+    this.ensureColumn('observations', 'repo_id', 'TEXT');
+    this.ensureColumn('observations', 'git_branch', 'TEXT');
+    this.ensureColumn('observations', 'git_commit', 'TEXT');
+    this.ensureColumn('observations', 'parent_session_id', 'TEXT');
+    this.ensureColumn('observations', 'agent_role', 'TEXT');
+    this.ensureColumn('observations', 'superseded_by', 'INTEGER');
+    this.ensureColumn('observations', 'staleness_score', 'REAL NOT NULL DEFAULT 0');
+
+    this.ensureColumn('session_summaries', 'uuid', 'TEXT');
+    this.ensureColumn('session_summaries', 'platform', "TEXT NOT NULL DEFAULT 'claude'");
+    this.ensureColumn('session_summaries', 'client_kind', "TEXT NOT NULL DEFAULT 'claude-code'");
+    this.ensureColumn('session_summaries', 'capture_mode', "TEXT NOT NULL DEFAULT 'hook'");
+    this.ensureColumn('session_summaries', 'capture_fidelity', "TEXT NOT NULL DEFAULT 'high'");
+    this.ensureColumn('session_summaries', 'raw_event_id', 'INTEGER');
+    this.ensureColumn('session_summaries', 'platform_session_id', 'TEXT');
+    this.ensureColumn('session_summaries', 'platform_turn_id', 'TEXT');
+    this.ensureColumn('session_summaries', 'repo_root', 'TEXT');
+    this.ensureColumn('session_summaries', 'repo_id', 'TEXT');
+    this.ensureColumn('session_summaries', 'git_branch', 'TEXT');
+    this.ensureColumn('session_summaries', 'git_commit', 'TEXT');
+    this.ensureColumn('session_summaries', 'parent_session_id', 'TEXT');
+    this.ensureColumn('session_summaries', 'agent_role', 'TEXT');
+    this.ensureColumn('session_summaries', 'superseded_by', 'INTEGER');
+    this.ensureColumn('session_summaries', 'staleness_score', 'REAL NOT NULL DEFAULT 0');
+
+    this.ensureColumn('user_prompts', 'platform', "TEXT NOT NULL DEFAULT 'claude'");
+    this.ensureColumn('user_prompts', 'client_kind', "TEXT NOT NULL DEFAULT 'claude-code'");
+    this.ensureColumn('user_prompts', 'capture_mode', "TEXT NOT NULL DEFAULT 'hook'");
+    this.ensureColumn('user_prompts', 'platform_turn_id', 'TEXT');
+    this.ensureColumn('user_prompts', 'raw_event_id', 'INTEGER');
+    this.ensureColumn('user_prompts', 'repo_root', 'TEXT');
+    this.ensureColumn('user_prompts', 'repo_id', 'TEXT');
+    this.ensureColumn('user_prompts', 'git_branch', 'TEXT');
+    this.ensureColumn('user_prompts', 'git_commit', 'TEXT');
+    this.ensureColumn('user_prompts', 'parent_session_id', 'TEXT');
+    this.ensureColumn('user_prompts', 'agent_role', 'TEXT');
+
+    this.db.run(`
+      UPDATE observations
+      SET
+        platform = COALESCE(platform, (SELECT s.platform FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        client_kind = COALESCE(client_kind, (SELECT s.client_kind FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        capture_mode = COALESCE(capture_mode, (SELECT s.capture_mode FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        platform_session_id = COALESCE(platform_session_id, (SELECT s.platform_session_id FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        repo_root = COALESCE(repo_root, (SELECT s.repo_root FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        repo_id = COALESCE(repo_id, (SELECT s.repo_id FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        git_branch = COALESCE(git_branch, (SELECT s.git_branch FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        git_commit = COALESCE(git_commit, (SELECT s.git_commit FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        parent_session_id = COALESCE(parent_session_id, (SELECT s.parent_session_id FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id)),
+        agent_role = COALESCE(agent_role, (SELECT s.agent_role FROM sdk_sessions s WHERE s.memory_session_id = observations.memory_session_id))
+    `);
+
+    this.db.run(`
+      UPDATE session_summaries
+      SET
+        platform = COALESCE(platform, (SELECT s.platform FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        client_kind = COALESCE(client_kind, (SELECT s.client_kind FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        capture_mode = COALESCE(capture_mode, (SELECT s.capture_mode FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        platform_session_id = COALESCE(platform_session_id, (SELECT s.platform_session_id FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        repo_root = COALESCE(repo_root, (SELECT s.repo_root FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        repo_id = COALESCE(repo_id, (SELECT s.repo_id FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        git_branch = COALESCE(git_branch, (SELECT s.git_branch FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        git_commit = COALESCE(git_commit, (SELECT s.git_commit FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        parent_session_id = COALESCE(parent_session_id, (SELECT s.parent_session_id FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id)),
+        agent_role = COALESCE(agent_role, (SELECT s.agent_role FROM sdk_sessions s WHERE s.memory_session_id = session_summaries.memory_session_id))
+    `);
+
+    this.db.run(`
+      UPDATE user_prompts
+      SET
+        platform = COALESCE(platform, (SELECT s.platform FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        client_kind = COALESCE(client_kind, (SELECT s.client_kind FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        capture_mode = COALESCE(capture_mode, (SELECT s.capture_mode FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        repo_root = COALESCE(repo_root, (SELECT s.repo_root FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        repo_id = COALESCE(repo_id, (SELECT s.repo_id FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        git_branch = COALESCE(git_branch, (SELECT s.git_branch FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        git_commit = COALESCE(git_commit, (SELECT s.git_commit FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        parent_session_id = COALESCE(parent_session_id, (SELECT s.parent_session_id FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id)),
+        agent_role = COALESCE(agent_role, (SELECT s.agent_role FROM sdk_sessions s WHERE s.content_session_id = user_prompts.content_session_id))
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_observations_platform ON observations(platform)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_observations_raw_event_id ON observations(raw_event_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_session_summaries_platform ON session_summaries(platform)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_session_summaries_raw_event_id ON session_summaries(raw_event_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_user_prompts_platform ON user_prompts(platform)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_user_prompts_raw_event_id ON user_prompts(raw_event_id)');
+
+    this.recordMigration(26);
+  }
+
+  /**
+   * Add platform metadata to the persistent queue (migration 27)
+   */
+  private addPendingMessageEventColumns(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(27) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.ensureColumn('pending_messages', 'raw_event_id', 'INTEGER');
+    this.ensureColumn('pending_messages', 'platform', "TEXT NOT NULL DEFAULT 'claude'");
+    this.ensureColumn('pending_messages', 'client_kind', "TEXT NOT NULL DEFAULT 'claude-code'");
+    this.ensureColumn('pending_messages', 'capture_mode', "TEXT NOT NULL DEFAULT 'hook'");
+    this.ensureColumn('pending_messages', 'platform_turn_id', 'TEXT');
+    this.ensureColumn('pending_messages', 'repo_root', 'TEXT');
+    this.ensureColumn('pending_messages', 'repo_id', 'TEXT');
+    this.ensureColumn('pending_messages', 'git_branch', 'TEXT');
+    this.ensureColumn('pending_messages', 'git_commit', 'TEXT');
+    this.ensureColumn('pending_messages', 'parent_session_id', 'TEXT');
+    this.ensureColumn('pending_messages', 'agent_role', 'TEXT');
+
+    this.db.run(`
+      UPDATE pending_messages
+      SET
+        platform = COALESCE(platform, (SELECT s.platform FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        client_kind = COALESCE(client_kind, (SELECT s.client_kind FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        capture_mode = COALESCE(capture_mode, (SELECT s.capture_mode FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        repo_root = COALESCE(repo_root, (SELECT s.repo_root FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        repo_id = COALESCE(repo_id, (SELECT s.repo_id FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        git_branch = COALESCE(git_branch, (SELECT s.git_branch FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        git_commit = COALESCE(git_commit, (SELECT s.git_commit FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        parent_session_id = COALESCE(parent_session_id, (SELECT s.parent_session_id FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id)),
+        agent_role = COALESCE(agent_role, (SELECT s.agent_role FROM sdk_sessions s WHERE s.id = pending_messages.session_db_id))
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_pending_messages_raw_event_id ON pending_messages(raw_event_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_pending_messages_platform ON pending_messages(platform)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_pending_messages_repo_id ON pending_messages(repo_id)');
+
+    this.recordMigration(27);
+  }
+
+  /**
+   * Create persisted projection metadata table (migration 28)
+   */
+  private createMemoryProjectionsTable(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(28) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS memory_projections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        repo_id TEXT,
+        repo_root TEXT,
+        project TEXT NOT NULL,
+        projection_type TEXT NOT NULL,
+        target_path TEXT NOT NULL,
+        content TEXT NOT NULL,
+        generated_at TEXT NOT NULL,
+        generated_at_epoch INTEGER NOT NULL,
+        raw_event_id INTEGER,
+        UNIQUE(projection_type, target_path),
+        FOREIGN KEY(raw_event_id) REFERENCES raw_events(id) ON DELETE SET NULL
+      )
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_memory_projections_repo_id ON memory_projections(repo_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_memory_projections_project ON memory_projections(project)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_memory_projections_generated ON memory_projections(generated_at_epoch DESC)');
+
+    this.recordMigration(28);
+  }
+
+  /**
+   * Create retrieval feedback table for ranking/evals (migration 29)
+   */
+  private createRetrievalFeedbackTable(): void {
+    const applied = this.db.prepare('SELECT version FROM schema_versions WHERE version = ?').get(29) as SchemaVersion | undefined;
+    if (applied) return;
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS retrieval_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        observation_id INTEGER,
+        raw_event_id INTEGER,
+        content_session_id TEXT,
+        platform TEXT,
+        client_kind TEXT,
+        tool_name TEXT,
+        query_text TEXT,
+        feedback_label TEXT,
+        feedback_score REAL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        created_at_epoch INTEGER NOT NULL,
+        FOREIGN KEY(observation_id) REFERENCES observations(id) ON DELETE SET NULL,
+        FOREIGN KEY(raw_event_id) REFERENCES raw_events(id) ON DELETE SET NULL,
+        FOREIGN KEY(content_session_id) REFERENCES sdk_sessions(content_session_id) ON DELETE SET NULL
+      )
+    `);
+
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_observation ON retrieval_feedback(observation_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_session ON retrieval_feedback(content_session_id)');
+    this.db.run('CREATE INDEX IF NOT EXISTS idx_retrieval_feedback_created ON retrieval_feedback(created_at_epoch DESC)');
+
+    this.recordMigration(29);
+  }
+
+  private ensureColumn(table: string, column: string, definition: string): void {
+    const tableInfo = this.db.query(`PRAGMA table_info(${table})`).all() as TableColumnInfo[];
+    const hasColumn = tableInfo.some(info => info.name === column);
+    if (!hasColumn) {
+      this.db.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      logger.debug('DB', `Added ${column} column to ${table}`);
+    }
+  }
+
+  private recordMigration(version: number): void {
+    this.db.prepare('INSERT OR IGNORE INTO schema_versions (version, applied_at) VALUES (?, ?)').run(version, new Date().toISOString());
   }
 }

@@ -19,6 +19,17 @@ export interface PersistentPendingMessage {
   cwd: string | null;
   last_assistant_message: string | null;
   prompt_number: number | null;
+  raw_event_id: number | null;
+  platform: string | null;
+  client_kind: string | null;
+  capture_mode: string | null;
+  platform_turn_id: string | null;
+  repo_root: string | null;
+  repo_id: string | null;
+  git_branch: string | null;
+  git_commit: string | null;
+  parent_session_id: string | null;
+  agent_role: string | null;
   status: 'pending' | 'processing' | 'processed' | 'failed';
   retry_count: number;
   created_at_epoch: number;
@@ -55,17 +66,22 @@ export class PendingMessageStore {
 
   /**
    * Enqueue a new message (persist before processing)
+   * Uses the source event time when available so replayed imports preserve chronology.
    * @returns The database ID of the persisted message
    */
   enqueue(sessionDbId: number, contentSessionId: string, message: PendingMessage): number {
-    const now = Date.now();
+    const createdAtEpoch = Number.isFinite(message.source_event_epoch)
+      ? Number(message.source_event_epoch)
+      : Date.now();
     const stmt = this.db.prepare(`
       INSERT INTO pending_messages (
         session_db_id, content_session_id, message_type,
         tool_name, tool_input, tool_response, cwd,
         last_assistant_message,
-        prompt_number, status, retry_count, created_at_epoch
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?)
+        prompt_number, raw_event_id, platform, client_kind, capture_mode, platform_turn_id,
+        repo_root, repo_id, git_branch, git_commit, parent_session_id, agent_role,
+        created_at_epoch
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -78,7 +94,18 @@ export class PendingMessageStore {
       message.cwd || null,
       message.last_assistant_message || null,
       message.prompt_number || null,
-      now
+      message.raw_event_id || null,
+      message.platform || 'claude',
+      message.client_kind || 'claude-code',
+      message.capture_mode || 'hook',
+      message.platform_turn_id || null,
+      message.repo_root || null,
+      message.repo_id || null,
+      message.git_branch || null,
+      message.git_commit || null,
+      message.parent_session_id || null,
+      message.agent_role || null,
+      createdAtEpoch
     );
 
     return result.lastInsertRowid as number;
@@ -483,7 +510,18 @@ export class PendingMessageStore {
       tool_response: persistent.tool_response ? JSON.parse(persistent.tool_response) : undefined,
       prompt_number: persistent.prompt_number || undefined,
       cwd: persistent.cwd || undefined,
-      last_assistant_message: persistent.last_assistant_message || undefined
+      last_assistant_message: persistent.last_assistant_message || undefined,
+      raw_event_id: persistent.raw_event_id || undefined,
+      platform: persistent.platform as any,
+      client_kind: persistent.client_kind as any,
+      capture_mode: persistent.capture_mode as any,
+      platform_turn_id: persistent.platform_turn_id || undefined,
+      repo_root: persistent.repo_root || undefined,
+      repo_id: persistent.repo_id || undefined,
+      git_branch: persistent.git_branch || undefined,
+      git_commit: persistent.git_commit || undefined,
+      parent_session_id: persistent.parent_session_id || undefined,
+      agent_role: persistent.agent_role || undefined
     };
   }
 }

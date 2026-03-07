@@ -257,6 +257,8 @@ export interface DateRange {
 
 export interface SearchFilters {
   project?: string;
+  repoRoot?: string;
+  repoId?: string;
   type?: ObservationRow['type'] | ObservationRow['type'][];
   concepts?: string | string[];
   files?: string | string[];

@@ -52,7 +52,12 @@ export const summarizeHandler: EventHandler = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contentSessionId: sessionId,
-          last_assistant_message: lastAssistantMessage
+          last_assistant_message: lastAssistantMessage,
+          platform: input.platform === 'cursor' ? 'cursor' : 'claude',
+          clientKind: input.platform === 'cursor' ? 'cursor' : 'claude-code',
+          captureMode: 'hook',
+          platformSessionId: sessionId,
+          cwd: input.cwd
         }),
       },
       SUMMARIZE_TIMEOUT_MS

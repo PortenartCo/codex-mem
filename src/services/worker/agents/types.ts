@@ -8,6 +8,7 @@
 
 import type { ActiveSession } from '../../worker-types.js';
 import type { ParsedObservation, ParsedSummary } from '../../../sdk/parser.js';
+import type { MemoryCaptureMode, MemoryClientKind, MemoryPlatform } from '../../platform/types.js';
 
 // ============================================================================
 // Worker Reference Type
@@ -45,6 +46,15 @@ export interface ObservationSSEPayload {
   project: string;
   prompt_number: number;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export interface SummarySSEPayload {
@@ -59,6 +69,15 @@ export interface SummarySSEPayload {
   project: string;
   prompt_number: number;
   created_at_epoch: number;
+  platform?: MemoryPlatform;
+  client_kind?: MemoryClientKind;
+  capture_mode?: MemoryCaptureMode;
+  platform_session_id?: string | null;
+  repo_root?: string | null;
+  repo_id?: string | null;
+  git_branch?: string | null;
+  parent_session_id?: string | null;
+  agent_role?: string | null;
 }
 
 export type SSEEventPayload =

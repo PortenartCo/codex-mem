@@ -74,7 +74,7 @@ export class PaginationHelper {
   getObservations(offset: number, limit: number, project?: string): PaginatedResult<Observation> {
     const result = this.paginate<Observation>(
       'observations',
-      'id, memory_session_id, project, type, title, subtitle, narrative, text, facts, concepts, files_read, files_modified, prompt_number, created_at, created_at_epoch',
+      'id, memory_session_id, project, type, title, subtitle, narrative, text, facts, concepts, files_read, files_modified, prompt_number, created_at, created_at_epoch, platform, client_kind, capture_mode, capture_fidelity, platform_session_id, repo_root, repo_id, git_branch, parent_session_id, agent_role',
       offset,
       limit,
       project
@@ -103,6 +103,16 @@ export class PaginationHelper {
         ss.completed,
         ss.next_steps,
         ss.project,
+        ss.platform,
+        ss.client_kind,
+        ss.capture_mode,
+        ss.capture_fidelity,
+        ss.platform_session_id,
+        ss.repo_root,
+        ss.repo_id,
+        ss.git_branch,
+        ss.parent_session_id,
+        ss.agent_role,
         ss.created_at,
         ss.created_at_epoch
       FROM session_summaries ss
@@ -136,7 +146,8 @@ export class PaginationHelper {
     const db = this.dbManager.getSessionStore().db;
 
     let query = `
-      SELECT up.id, up.content_session_id, s.project, up.prompt_number, up.prompt_text, up.created_at, up.created_at_epoch
+      SELECT up.id, up.content_session_id, s.project, up.prompt_number, up.prompt_text, up.created_at, up.created_at_epoch,
+             up.platform, up.client_kind, up.capture_mode, up.platform_turn_id, up.repo_root, up.repo_id, up.git_branch, up.parent_session_id, up.agent_role
       FROM user_prompts up
       JOIN sdk_sessions s ON up.content_session_id = s.content_session_id
     `;

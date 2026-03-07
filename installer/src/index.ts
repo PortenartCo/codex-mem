@@ -12,7 +12,7 @@ import { runCompletion } from './steps/complete.js';
 async function runInstaller(): Promise<void> {
   if (!process.stdin.isTTY) {
     console.error('Error: This installer requires an interactive terminal.');
-    console.error('Run directly: npx claude-mem-installer');
+    console.error('Run directly: npx codex-mem-installer');
     process.exit(1);
   }
 

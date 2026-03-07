@@ -11,23 +11,34 @@
 
 import { SessionManager } from '../SessionManager.js';
 import { SessionEventBroadcaster } from '../events/SessionEventBroadcaster.js';
+import { DatabaseManager } from '../DatabaseManager.js';
 import { logger } from '../../../utils/logger.js';
 
 export class SessionCompletionHandler {
   constructor(
     private sessionManager: SessionManager,
-    private eventBroadcaster: SessionEventBroadcaster
+    private eventBroadcaster: SessionEventBroadcaster,
+    private dbManager: DatabaseManager
   ) {}
 
   /**
    * Complete session by database ID
    * Used by DELETE /api/sessions/:id and POST /api/sessions/:id/complete
    */
-  async completeByDbId(sessionDbId: number): Promise<void> {
+  async completeByDbId(sessionDbId: number, completedAtEpoch: number = Date.now()): Promise<void> {
+    logger.info('SESSION', 'Completing session', {
+      sessionId: sessionDbId,
+      completedAtEpoch
+    });
+    this.dbManager.getSessionStore().markSessionCompleted(sessionDbId, completedAtEpoch);
+
     // Delete from session manager (aborts SDK agent)
     await this.sessionManager.deleteSession(sessionDbId);
 
     // Broadcast session completed event
     this.eventBroadcaster.broadcastSessionCompleted(sessionDbId);
+    logger.debug('SESSION', 'Session completion broadcasted', {
+      sessionId: sessionDbId
+    });
   }
 }

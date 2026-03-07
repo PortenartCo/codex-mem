@@ -76,6 +76,16 @@ export class SessionManager {
         });
         session.project = dbSession.project;
       }
+      session.platform = dbSession.platform as ActiveSession['platform'];
+      session.clientKind = dbSession.client_kind as ActiveSession['clientKind'];
+      session.captureMode = dbSession.capture_mode as ActiveSession['captureMode'];
+      session.platformSessionId = dbSession.platform_session_id || dbSession.content_session_id;
+      session.parentSessionId = dbSession.parent_session_id;
+      session.agentRole = dbSession.agent_role;
+      session.repoRoot = dbSession.repo_root;
+      session.repoId = dbSession.repo_id;
+      session.gitBranch = dbSession.git_branch;
+      session.gitCommit = dbSession.git_commit;
 
       // Update userPrompt for continuation prompts
       if (currentUserPrompt) {
@@ -143,6 +153,16 @@ export class SessionManager {
       contentSessionId: dbSession.content_session_id,
       memorySessionId: null,  // Always start fresh - SDK will capture new ID
       project: dbSession.project,
+      platform: dbSession.platform as ActiveSession['platform'],
+      clientKind: dbSession.client_kind as ActiveSession['clientKind'],
+      captureMode: dbSession.capture_mode as ActiveSession['captureMode'],
+      platformSessionId: dbSession.platform_session_id || dbSession.content_session_id,
+      parentSessionId: dbSession.parent_session_id,
+      agentRole: dbSession.agent_role,
+      repoRoot: dbSession.repo_root,
+      repoId: dbSession.repo_id,
+      gitBranch: dbSession.git_branch,
+      gitCommit: dbSession.git_commit,
       userPrompt,
       pendingMessages: [],
       abortController: new AbortController(),
@@ -212,7 +232,19 @@ export class SessionManager {
       tool_input: data.tool_input,
       tool_response: data.tool_response,
       prompt_number: data.prompt_number,
-      cwd: data.cwd
+      cwd: data.cwd,
+      raw_event_id: data.raw_event_id,
+      platform: data.platform,
+      client_kind: data.client_kind,
+      capture_mode: data.capture_mode,
+      platform_turn_id: data.platform_turn_id,
+      repo_root: data.repo_root,
+      repo_id: data.repo_id,
+      git_branch: data.git_branch,
+      git_commit: data.git_commit,
+      parent_session_id: data.parent_session_id,
+      agent_role: data.agent_role,
+      source_event_epoch: data.source_event_epoch
     };
 
     try {
@@ -242,7 +274,7 @@ export class SessionManager {
    * CRITICAL: Persists to database FIRST before adding to in-memory queue.
    * This ensures summarize requests survive worker crashes.
    */
-  queueSummarize(sessionDbId: number, lastAssistantMessage?: string): void {
+  queueSummarize(sessionDbId: number, lastAssistantMessage?: string, sourceEventEpoch?: number): void {
     // Auto-initialize from database if needed (handles worker restarts)
     let session = this.sessions.get(sessionDbId);
     if (!session) {
@@ -252,7 +284,17 @@ export class SessionManager {
     // CRITICAL: Persist to database FIRST
     const message: PendingMessage = {
       type: 'summarize',
-      last_assistant_message: lastAssistantMessage
+      last_assistant_message: lastAssistantMessage,
+      platform: session.platform,
+      client_kind: session.clientKind,
+      capture_mode: session.captureMode,
+      repo_root: session.repoRoot,
+      repo_id: session.repoId,
+      git_branch: session.gitBranch,
+      git_commit: session.gitCommit,
+      parent_session_id: session.parentSessionId,
+      agent_role: session.agentRole,
+      source_event_epoch: sourceEventEpoch
     };
 
     try {

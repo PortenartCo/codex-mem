@@ -58,7 +58,11 @@ export const observationHandler: EventHandler = {
           tool_name: toolName,
           tool_input: toolInput,
           tool_response: toolResponse,
-          cwd
+          cwd,
+          platform: input.platform === 'cursor' ? 'cursor' : 'claude',
+          clientKind: input.platform === 'cursor' ? 'cursor' : 'claude-code',
+          captureMode: 'hook',
+          platformSessionId: sessionId
         })
         // Note: Removed signal to avoid Windows Bun cleanup issue (libuv assertion)
       });
