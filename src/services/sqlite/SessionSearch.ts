@@ -16,8 +16,8 @@ import {
 
 /**
  * Search interface for session-based memory
- * Provides filter-only structured queries for sessions, observations, and user prompts
- * Vector search is handled by ChromaDB - this class only supports filtering without query text
+ * Provides structured filters and lexical text matching for observations, summaries, and prompts.
+ * Semantic/vector search is handled independently by ChromaDB.
  */
 export class SessionSearch {
   private db: Database;
@@ -290,78 +290,75 @@ export class SessionSearch {
   }
 
   /**
-   * Search observations using filter-only direct SQLite query.
-   * Vector search is handled by ChromaDB - this only supports filtering without query text.
+   * Literal, parameterized substring matching. SQLite LIKE works even on Bun
+   * builds without FTS5 and does not interpret the user's input as FTS syntax.
+   * ESCAPE protects %, _, and backslash from acting as SQL LIKE wildcards.
+   * This is a lexical fallback, not semantic/vector ranking.
+   */
+  private buildTextClause(query: string, alias: string, columns: string[], params: any[]): string {
+    const pattern = '%' + query.trim().replace(/[\\%_]/g, '\\$&') + '%';
+    const clauses = columns.map(column => {
+      params.push(pattern);
+      return "COALESCE(" + alias + "." + column + ", '') LIKE ? ESCAPE '\\'";
+    });
+    return '(' + clauses.join(' OR ') + ')';
+  }
+
+  /**
+   * Search observations with optional lexical text matching and existing
+   * project/repository/type/date/concept/file filters. SQLite is authoritative.
    */
   searchObservations(query: string | undefined, options: SearchOptions = {}): ObservationSearchResult[] {
     const params: any[] = [];
     const { limit = 50, offset = 0, orderBy = 'relevance', ...filters } = options;
+    const conditions: string[] = [];
+    const filterClause = this.buildFilterClause(filters, params, 'o');
+    if (filterClause) conditions.push(filterClause);
 
-    // FILTER-ONLY PATH: When no query text, query table directly
-    // This enables date filtering which Chroma cannot do (requires direct SQLite access)
-    if (!query) {
-      const filterClause = this.buildFilterClause(filters, params, 'o');
-      if (!filterClause) {
-        throw new Error('Either query or filters required for search');
-      }
-
-      const orderClause = this.buildOrderClause(orderBy, false);
-
-      const sql = `
-        SELECT o.*, o.discovery_tokens
-        FROM observations o
-        WHERE ${filterClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `;
-
-      params.push(limit, offset);
-      return this.db.prepare(sql).all(...params) as ObservationSearchResult[];
+    if (query && query.trim()) {
+      conditions.push(this.buildTextClause(query, 'o', [
+        'title', 'subtitle', 'narrative', 'text', 'facts', 'concepts'
+      ], params));
+    }
+    if (conditions.length === 0) {
+      throw new Error('Either query or filters required for search');
     }
 
-    // Vector search with query text should be handled by ChromaDB
-    // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
-    return [];
+    const sql = 'SELECT o.*, o.discovery_tokens FROM observations o WHERE '
+      + conditions.join(' AND ') + ' ' + this.buildOrderClause(orderBy, false)
+      + ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    return this.db.prepare(sql).all(...params) as ObservationSearchResult[];
   }
 
   /**
-   * Search session summaries using filter-only direct SQLite query.
-   * Vector search is handled by ChromaDB - this only supports filtering without query text.
+   * Search session summaries by optional literal text and structured filters.
    */
   searchSessions(query: string | undefined, options: SearchOptions = {}): SessionSummarySearchResult[] {
     const params: any[] = [];
     const { limit = 50, offset = 0, orderBy = 'relevance', ...filters } = options;
+    const filterOptions = { ...filters };
+    delete filterOptions.type;
+    const conditions: string[] = [];
+    const filterClause = this.buildFilterClause(filterOptions, params, 's');
+    if (filterClause) conditions.push(filterClause);
 
-    // FILTER-ONLY PATH: When no query text, query session_summaries table directly
-    if (!query) {
-      const filterOptions = { ...filters };
-      delete filterOptions.type;
-      const filterClause = this.buildFilterClause(filterOptions, params, 's');
-      if (!filterClause) {
-        throw new Error('Either query or filters required for search');
-      }
-
-      const orderClause = orderBy === 'date_asc'
-        ? 'ORDER BY s.created_at_epoch ASC'
-        : 'ORDER BY s.created_at_epoch DESC';
-
-      const sql = `
-        SELECT s.*, s.discovery_tokens
-        FROM session_summaries s
-        WHERE ${filterClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `;
-
-      params.push(limit, offset);
-      return this.db.prepare(sql).all(...params) as SessionSummarySearchResult[];
+    if (query && query.trim()) {
+      conditions.push(this.buildTextClause(query, 's', [
+        'request', 'investigated', 'learned', 'completed', 'next_steps', 'notes'
+      ], params));
+    }
+    if (conditions.length === 0) {
+      throw new Error('Either query or filters required for search');
     }
 
-    // Vector search with query text should be handled by ChromaDB
-    // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
-    return [];
+    const orderClause = orderBy === 'date_asc'
+      ? 'ORDER BY s.created_at_epoch ASC'
+      : 'ORDER BY s.created_at_epoch DESC';
+    const sql = 'SELECT s.*, s.discovery_tokens FROM session_summaries s WHERE '
+      + conditions.join(' AND ') + ' ' + orderClause + ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    return this.db.prepare(sql).all(...params) as SessionSummarySearchResult[];
   }
 
   /**
@@ -542,8 +539,7 @@ export class SessionSearch {
   }
 
   /**
-   * Search user prompts using filter-only direct SQLite query.
-   * Vector search is handled by ChromaDB - this only supports filtering without query text.
+   * Search user prompts using project/repo/date filters and optional literal text.
    */
   searchUserPrompts(query: string | undefined, options: SearchOptions = {}): UserPromptSearchResult[] {
     const params: any[] = [];
@@ -593,34 +589,21 @@ export class SessionSearch {
       }
     }
 
-    // FILTER-ONLY PATH: When no query text, query user_prompts table directly
-    if (!query) {
-      if (baseConditions.length === 0) {
-        throw new Error('Either query or filters required for search');
-      }
-
-      const whereClause = `WHERE ${baseConditions.join(' AND ')}`;
-      const orderClause = orderBy === 'date_asc'
-        ? 'ORDER BY up.created_at_epoch ASC'
-        : 'ORDER BY up.created_at_epoch DESC';
-
-      const sql = `
-        SELECT up.*
-        FROM user_prompts up
-        JOIN sdk_sessions s ON up.content_session_id = s.content_session_id
-        ${whereClause}
-        ${orderClause}
-        LIMIT ? OFFSET ?
-      `;
-
-      params.push(limit, offset);
-      return this.db.prepare(sql).all(...params) as UserPromptSearchResult[];
+    if (query && query.trim()) {
+      baseConditions.push(this.buildTextClause(query, 'up', ['prompt_text'], params));
+    }
+    if (baseConditions.length === 0) {
+      throw new Error('Either query or filters required for search');
     }
 
-    // Vector search with query text should be handled by ChromaDB
-    // This method only supports filter-only queries (query=undefined)
-    logger.warn('DB', 'Text search not supported - use ChromaDB for vector search');
-    return [];
+    const orderClause = orderBy === 'date_asc'
+      ? 'ORDER BY up.created_at_epoch ASC'
+      : 'ORDER BY up.created_at_epoch DESC';
+    const sql = 'SELECT up.* FROM user_prompts up '
+      + 'JOIN sdk_sessions s ON up.content_session_id = s.content_session_id WHERE '
+      + baseConditions.join(' AND ') + ' ' + orderClause + ' LIMIT ? OFFSET ?';
+    params.push(limit, offset);
+    return this.db.prepare(sql).all(...params) as UserPromptSearchResult[];
   }
 
   /**
