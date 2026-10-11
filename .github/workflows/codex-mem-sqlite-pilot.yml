@@ -5,6 +5,7 @@ on:
     branches:
       - fix/sqlite-only-recall-and-manual-save-20261011
       - security/codex-mem-isolated-pilot
+      - security/codex-mem-retention-synthetic-20261012
   workflow_dispatch:
 
 permissions:
@@ -28,17 +29,25 @@ jobs:
         shell: bash
     steps:
       - name: Checkout without persisted credentials
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: '24'
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.3'
+      - name: Set up Python for synthetic retention tests
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Verify synthetic-only retention, encryption, and restore
+        run: |
+          python -m unittest discover -s tests/security -p test_synthetic_lifecycle.py -q
+          node --test tests/lifecycle/synthetic-crypto.node.cjs
       - name: Install dependencies without npm lifecycle hooks
         run: npm install --ignore-scripts --no-audit --no-fund --package-lock=false
       - name: Run SQLite-only and existing search regression tests
