@@ -10,6 +10,7 @@
  */
 
 import express, { Request, Response, Application } from 'express';
+import { pilotHttpGate, assertPilotConfiguration } from '../security/PilotGuard.js';
 import http from 'http';
 import * as fs from 'fs';
 import path from 'path';
@@ -95,6 +96,7 @@ export class Server {
     if (host !== '127.0.0.1' && host !== '::1') {
       throw new Error('Codex-Mem worker must bind to loopback only (127.0.0.1 or ::1)');
     }
+    assertPilotConfiguration();
     return new Promise<void>((resolve, reject) => {
       this.server = this.app.listen(port, host, () => {
         logger.info('SYSTEM', 'HTTP server started', { host, port, pid: process.pid });
@@ -155,6 +157,8 @@ export class Server {
    * Setup Express middleware
    */
   private setupMiddleware(): void {
+    // Before JSON parsing, routes or static content: no unauthorized pilot HTTP reads.
+    this.app.use(pilotHttpGate);
     const middlewares = createMiddleware(summarizeRequestBody);
     middlewares.forEach(mw => this.app.use(mw));
   }

@@ -2,6 +2,7 @@ import { createInterface } from 'readline';
 import { readFile } from 'fs/promises';
 import { getWorkerHost, getWorkerPort } from '../../shared/worker-utils.js';
 import { logger } from '../../utils/logger.js';
+import { pilotClientHeaders } from '../security/PilotGuard.js';
 import {
   normalizeCodexAppServerMessage,
   normalizeCodexExecJsonEntry,
@@ -20,7 +21,8 @@ async function postEvents(events: NormalizedEvent[]): Promise<void> {
   const response = await fetch(`${WORKER_BASE_URL}/api/events/batch`, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      ...pilotClientHeaders()
     },
     body: JSON.stringify({ events })
   });

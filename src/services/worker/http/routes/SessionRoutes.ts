@@ -8,6 +8,7 @@
 import express, { Request, Response } from 'express';
 import { getWorkerPort } from '../../../../shared/worker-utils.js';
 import { logger } from '../../../../utils/logger.js';
+import { isPilotMode, validatePilotEvents } from '../../../security/PilotGuard.js';
 import { stripMemoryTagsFromJson, stripMemoryTagsFromPrompt } from '../../../../utils/tag-stripping.js';
 import { SessionManager } from '../../SessionManager.js';
 import { DatabaseManager } from '../../DatabaseManager.js';
@@ -97,6 +98,8 @@ export class SessionRoutes extends BaseRouteHandler {
   private static readonly STALE_GENERATOR_THRESHOLD_MS = 30_000; // 30 seconds (#1099)
 
   private ensureGeneratorRunning(sessionDbId: number, source: string): void {
+    // Local synthetic pilot records events only. Never spawn a model provider.
+    if (isPilotMode()) return;
     const session = this.sessionManager.getSession(sessionDbId);
     if (!session) return;
 
@@ -1269,7 +1272,13 @@ export class SessionRoutes extends BaseRouteHandler {
       return;
     }
 
-    const results = this.ingestNormalizedEvents([this.coerceNormalizedEvent(event)]);
+    const normalized = [this.coerceNormalizedEvent(event)];
+    const guard = validatePilotEvents(normalized);
+    if (!guard.allowed) {
+      res.status(guard.status).json({ error: guard.reason });
+      return;
+    }
+    const results = this.ingestNormalizedEvents(normalized);
     res.json({ ingested: results.length, events: results });
   });
 
@@ -1280,7 +1289,13 @@ export class SessionRoutes extends BaseRouteHandler {
       return;
     }
 
-    const results = this.ingestNormalizedEvents(input.map((event: any) => this.coerceNormalizedEvent(event)));
+    const normalized = input.map((event: any) => this.coerceNormalizedEvent(event));
+    const guard = validatePilotEvents(normalized);
+    if (!guard.allowed) {
+      res.status(guard.status).json({ error: guard.reason });
+      return;
+    }
+    const results = this.ingestNormalizedEvents(normalized);
     res.json({
       ingested: results.filter(result => result.inserted).length,
       total: results.length,
