@@ -13,6 +13,7 @@
 import { BaseSearchStrategy, SearchStrategy } from './SearchStrategy.js';
 import {
   StrategySearchOptions,
+  SearchOptions,
   StrategySearchResult,
   SEARCH_CONSTANTS,
   ObservationSearchResult,
@@ -71,7 +72,7 @@ export class SQLiteSearchStrategy extends BaseSearchStrategy implements SearchSt
       if (searchObservations) {
         const obsOptions = {
           ...baseOptions,
-          type: obsType,
+          type: obsType as SearchOptions['type'],
           concepts,
           files
         };
