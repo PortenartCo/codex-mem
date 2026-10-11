@@ -313,14 +313,18 @@ describe('SearchOrchestrator', () => {
     });
 
     describe('search', () => {
-      it('should return empty results for query search without Chroma', async () => {
+      it('should use lexical SQLite search for query text without Chroma', async () => {
         const result = await orchestrator.search({
-          query: 'semantic query'
+          query: 'semantic query',
+          project: 'test-project'
         });
 
-        // No Chroma available, can't do semantic search
-        expect(result.results.observations).toHaveLength(0);
+        expect(result.results.observations).toHaveLength(1);
         expect(result.usedChroma).toBe(false);
+        expect(result.strategy).toBe('sqlite');
+        expect(mockSessionSearch.searchObservations).toHaveBeenCalledWith(
+          'semantic query', expect.objectContaining({ project: 'test-project' })
+        );
       });
 
       it('should still work for filter-only queries', async () => {
