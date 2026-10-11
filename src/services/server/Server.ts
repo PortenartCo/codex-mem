@@ -90,6 +90,11 @@ export class Server {
    * Start listening on the specified host and port
    */
   async listen(port: number, host: string): Promise<void> {
+    // This local memory API has no data-endpoint authentication. Fail closed
+    // rather than exposing stored conversations on a configured remote host.
+    if (host !== '127.0.0.1' && host !== '::1') {
+      throw new Error('Codex-Mem worker must bind to loopback only (127.0.0.1 or ::1)');
+    }
     return new Promise<void>((resolve, reject) => {
       this.server = this.app.listen(port, host, () => {
         logger.info('SYSTEM', 'HTTP server started', { host, port, pid: process.pid });
