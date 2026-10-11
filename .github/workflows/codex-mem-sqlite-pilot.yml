@@ -53,13 +53,15 @@ jobs:
       - name: Verify checked-in Worker matches reproducible local build
         run: git diff --exit-code -- plugin/scripts/worker-service.cjs
       - name: Create npm package without publishing
-        run: npm pack --pack-destination "$RUNNER_TEMP" --silent
+        run: |
+          mkdir -p .pack-validation
+          npm pack --pack-destination .pack-validation --silent
       - name: Verify packaged Worker matches tracked file
         run: |
-          mkdir -p "$RUNNER_TEMP/package-check"
-          tar --force-local -xf "$RUNNER_TEMP/codex-mem-cli-11.0.0.tgz" -C "$RUNNER_TEMP/package-check"
-          cmp "plugin/scripts/worker-service.cjs" "$RUNNER_TEMP/package-check/package/plugin/scripts/worker-service.cjs"
-          test -f "$RUNNER_TEMP/package-check/package/plugin/scripts/mcp-server.cjs"
-          test -f "$RUNNER_TEMP/package-check/package/plugin/scripts/context-generator.cjs"
-          test -f "$RUNNER_TEMP/package-check/package/plugin/ui/viewer-bundle.js"
+          mkdir -p .pack-validation/unpacked
+          tar -xf .pack-validation/codex-mem-cli-11.0.0.tgz -C .pack-validation/unpacked
+          cmp plugin/scripts/worker-service.cjs .pack-validation/unpacked/package/plugin/scripts/worker-service.cjs
+          test -f .pack-validation/unpacked/package/plugin/scripts/mcp-server.cjs
+          test -f .pack-validation/unpacked/package/plugin/scripts/context-generator.cjs
+          test -f .pack-validation/unpacked/package/plugin/ui/viewer-bundle.js
           echo "PACKAGE_VERIFIED"
