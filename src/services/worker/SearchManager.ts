@@ -223,7 +223,6 @@ export class SearchManager {
     let observations: ObservationSearchResult[] = [];
     let sessions: SessionSummarySearchResult[] = [];
     let prompts: UserPromptSearchResult[] = [];
-    let chromaFailed = false;
 
     // Determine which types to query based on type filter
     const searchObservations = !type || type === 'observations';
@@ -335,14 +334,21 @@ export class SearchManager {
         logger.debug('SEARCH', 'ChromaDB found no matches (final result, no FTS5 fallback)', {});
       }
     }
-    // ChromaDB not initialized - mark as failed to show proper error message
+    // PATH 3: lexical SQLite fallback when the optional Chroma engine is disabled.
+    // It remains a literal text search; no semantic similarity is implied.
     else if (query) {
-      chromaFailed = true;
-      logger.debug('SEARCH', 'ChromaDB not initialized - semantic search unavailable', {});
-      logger.debug('SEARCH', 'Install UVX/Python to enable vector search', { url: 'https://docs.astral.sh/uv/getting-started/installation/' });
-      observations = [];
-      sessions = [];
-      prompts = [];
+      logger.debug('SEARCH', 'Chroma disabled, using SQLite lexical matching', {});
+      if (searchObservations) {
+        observations = this.sessionSearch.searchObservations(query, {
+          ...options, type: obs_type, concepts, files
+        });
+      }
+      if (searchSessions) {
+        sessions = this.sessionSearch.searchSessions(query, options);
+      }
+      if (searchPrompts) {
+        prompts = this.sessionSearch.searchUserPrompts(query, options);
+      }
     }
 
     const totalResults = observations.length + sessions.length + prompts.length;
@@ -359,14 +365,6 @@ export class SearchManager {
     }
 
     if (totalResults === 0) {
-      if (chromaFailed) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `Vector search failed - semantic search unavailable.\n\nTo enable semantic search:\n1. Install uv: https://docs.astral.sh/uv/getting-started/installation/\n2. Restart the worker: npm run worker:restart\n\nNote: You can still use filter-only searches (date ranges, types, files) without a query term.`
-          }]
-        };
-      }
       return {
         content: [{
           type: 'text' as const,
@@ -531,6 +529,12 @@ export class SearchManager {
         } catch (chromaError) {
           logger.error('SEARCH', 'Chroma search failed for timeline, continuing without semantic results', {}, chromaError as Error);
         }
+      }
+
+      if (!this.chromaSync && query) {
+        results = this.sessionSearch.searchObservations(query, {
+          project, limit: 1, orderBy: 'date_desc'
+        });
       }
 
       if (results.length === 0) {
@@ -1007,6 +1011,10 @@ export class SearchManager {
       }
     }
 
+    if (!this.chromaSync && query) {
+      results = this.sessionSearch.searchObservations(query, options);
+    }
+
     if (results.length === 0) {
       return {
         content: [{
@@ -1070,6 +1078,10 @@ export class SearchManager {
       }
     }
 
+    if (!this.chromaSync && query) {
+      results = this.sessionSearch.searchSessions(query, options);
+    }
+
     if (results.length === 0) {
       return {
         content: [{
@@ -1131,6 +1143,10 @@ export class SearchManager {
           logger.debug('SEARCH', 'Hydrated user prompts from SQLite', { count: results.length });
         }
       }
+    }
+
+    if (!this.chromaSync && query) {
+      results = this.sessionSearch.searchUserPrompts(query, options);
     }
 
     if (results.length === 0) {

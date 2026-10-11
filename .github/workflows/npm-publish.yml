@@ -9,6 +9,9 @@ on:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # GitHub forbids using the secrets context directly in step if expressions.
+    env:
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     permissions:
       contents: read
       id-token: write
@@ -22,12 +25,12 @@ jobs:
       - run: npm install --ignore-scripts
       - run: npm run build
       - name: Publish to npm with token auth
-        if: ${{ secrets.NPM_TOKEN != '' }}
+        if: env.HAS_NPM_TOKEN == 'true'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       - name: Publish to npm with trusted publishing
-        if: ${{ secrets.NPM_TOKEN == '' }}
+        if: env.HAS_NPM_TOKEN != 'true'
         shell: bash
         run: |
           echo "NPM_TOKEN is not configured. Attempting npm trusted publishing via GitHub OIDC."

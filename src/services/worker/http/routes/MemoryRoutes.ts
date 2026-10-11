@@ -68,18 +68,21 @@ export class MemoryRoutes extends BaseRouteHandler {
       title: observation.title
     });
 
-    // 4. Sync to ChromaDB (async, fire-and-forget)
-    chromaSync.syncObservation(
-      result.id,
-      memorySessionId,
-      targetProject,
-      observation,
-      0,
-      result.createdAtEpoch,
-      0
-    ).catch(err => {
-      logger.error('CHROMA', 'ChromaDB sync failed', { id: result.id }, err as Error);
-    });
+    // 4. Chroma is optional. SQLite is the source of truth for this write.
+    // Do not throw after committing to SQLite: a client retry could duplicate it.
+    if (chromaSync) {
+      chromaSync.syncObservation(
+        result.id,
+        memorySessionId,
+        targetProject,
+        observation,
+        0,
+        result.createdAtEpoch,
+        0
+      ).catch(err => {
+        logger.error('CHROMA', 'ChromaDB sync failed', { id: result.id }, err as Error);
+      });
+    }
 
     // 5. Return success
     res.json({
