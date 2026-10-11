@@ -8,6 +8,7 @@
 import express, { Request, Response } from 'express';
 import { BaseRouteHandler } from '../BaseRouteHandler.js';
 import { logger } from '../../../../utils/logger.js';
+import { isPilotMode, validatePilotManualMemory } from '../../../security/PilotGuard.js';
 import type { DatabaseManager } from '../../DatabaseManager.js';
 
 export class MemoryRoutes extends BaseRouteHandler {
@@ -29,6 +30,12 @@ export class MemoryRoutes extends BaseRouteHandler {
   private handleSaveMemory = this.wrapHandler(async (req: Request, res: Response): Promise<void> => {
     const { text, title, project } = req.body;
     const targetProject = project || this.defaultProject;
+
+    const guard = validatePilotManualMemory(req.body);
+    if (!guard.allowed) {
+      res.status(guard.status).json({ error: guard.reason });
+      return;
+    }
 
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
       this.badRequest(res, 'text is required and must be non-empty');
@@ -65,7 +72,7 @@ export class MemoryRoutes extends BaseRouteHandler {
     logger.info('HTTP', 'Manual observation saved', {
       id: result.id,
       project: targetProject,
-      title: observation.title
+      ...(isPilotMode() ? {} : { title: observation.title })
     });
 
     // 4. Chroma is optional. SQLite is the source of truth for this write.

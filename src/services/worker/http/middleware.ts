@@ -6,6 +6,7 @@
  */
 
 import express, { Request, Response, NextFunction, RequestHandler } from 'express';
+import { isPilotMode } from '../../security/PilotGuard.js';
 import cors from 'cors';
 import path from 'path';
 import { getPackageRoot } from '../../../shared/paths.js';
@@ -21,8 +22,8 @@ export function createMiddleware(
 ): RequestHandler[] {
   const middlewares: RequestHandler[] = [];
 
-  // JSON parsing with 50mb limit
-  middlewares.push(express.json({ limit: '50mb' }));
+  // Strict bound for isolated capture, normal compatibility limit otherwise.
+  middlewares.push(express.json({ limit: isPilotMode() ? '128kb' : '50mb' }));
 
   // CORS - restrict to localhost origins only
   middlewares.push(cors({

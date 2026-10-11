@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - fix/sqlite-only-recall-and-manual-save-20261011
+      - security/codex-mem-isolated-pilot
   workflow_dispatch:
 
 permissions:
@@ -47,7 +48,8 @@ jobs:
             tests/worker/bootstrap-memory.test.ts \
             tests/platform/codex-normalization.test.ts \
             tests/integration/worker-api-endpoints.test.ts \
-            tests/server/loopback-security.test.ts
+            tests/server/loopback-security.test.ts \
+            tests/security
       - name: Rebuild distribution
         run: npm run build
       - name: Verify checked-in Worker matches reproducible local build
