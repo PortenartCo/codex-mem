@@ -35,7 +35,7 @@ describe('SQLite lexical recall without Chroma or vector dependencies', () => {
 
   afterEach(() => {
     search?.close();
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(dir, { recursive: true, force: true, maxRetries: 15, retryDelay: 100 });
   });
 
   it('retrieves observation text while preserving project filtering', () => {
@@ -52,7 +52,7 @@ describe('SQLite lexical recall without Chroma or vector dependencies', () => {
   it('searches summaries and prompts without Chroma', () => {
     expect(search.searchSessions('CITRON-BLEU', { project: 'pilot' }).map(s => s.id)).toEqual([10]);
     expect(search.searchUserPrompts('CITRON-BLEU', { project: 'pilot' }).map(p => p.id)).toEqual([31]);
-    expect(search.searchUserPrompts('CITRON-BLEU', { project: 'pilot', repoId: 'repo-other' })).toEqual([]);
+    expect(search.searchUserPrompts('CITRON-BLEU', { project: 'pilot', repoId: 'repo-unknown' })).toEqual([]);
   });
 
   it('preserves filter-only retrieval and safe pagination', () => {
