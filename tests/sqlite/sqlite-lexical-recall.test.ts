@@ -1,18 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { SessionSearch } from '../../src/services/sqlite/SessionSearch.js';
 
 describe('SQLite lexical recall without Chroma or vector dependencies', () => {
-  let dir: string;
   let search: SessionSearch;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'codex-mem-sqlite-recall-'));
-    const path = join(dir, 'memory.sqlite');
-    const db = new Database(path);
+    // An in-memory DB avoids Bun/Windows WAL file locking during teardown.
+    // These tests exercise LIKE retrieval even if FTS5 is not initialized.
+    search = new SessionSearch(':memory:');
+    const db = (search as any).db as Database;
     db.run('CREATE TABLE observations (id INTEGER PRIMARY KEY, memory_session_id TEXT, project TEXT, repo_root TEXT, repo_id TEXT, type TEXT, title TEXT, subtitle TEXT, narrative TEXT, text TEXT, facts TEXT, concepts TEXT, files_read TEXT, files_modified TEXT, discovery_tokens INTEGER, created_at TEXT, created_at_epoch INTEGER)');
     db.run('CREATE TABLE session_summaries (id INTEGER PRIMARY KEY, memory_session_id TEXT, project TEXT, repo_root TEXT, repo_id TEXT, request TEXT, investigated TEXT, learned TEXT, completed TEXT, next_steps TEXT, notes TEXT, files_read TEXT, files_edited TEXT, discovery_tokens INTEGER, created_at TEXT, created_at_epoch INTEGER)');
     db.run('CREATE TABLE sdk_sessions (id INTEGER PRIMARY KEY, content_session_id TEXT, project TEXT, repo_root TEXT, repo_id TEXT)');
@@ -29,13 +26,10 @@ describe('SQLite lexical recall without Chroma or vector dependencies', () => {
     db.run("INSERT INTO sdk_sessions(id, content_session_id, project, repo_id) VALUES (22, 'session-other', 'other-project', 'repo-other')");
     db.run("INSERT INTO user_prompts(id, content_session_id, prompt_number, prompt_text, created_at_epoch) VALUES (31, 'session-pilot', 1, 'Find CITRON-BLEU in local memory', 1006)");
     db.run("INSERT INTO user_prompts(id, content_session_id, prompt_number, prompt_text, created_at_epoch) VALUES (32, 'session-other', 1, 'Find CITRON-BLEU in local memory', 1007)");
-    db.close();
-    search = new SessionSearch(path);
   });
 
   afterEach(() => {
     search?.close();
-    rmSync(dir, { recursive: true, force: true, maxRetries: 15, retryDelay: 100 });
   });
 
   it('retrieves observation text while preserving project filtering', () => {
