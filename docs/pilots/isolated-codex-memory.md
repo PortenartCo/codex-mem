@@ -35,6 +35,8 @@ Start scripts should generate a fresh secret in process memory, pass it to the d
 
 The client-side Codex event forwarder and MCP search wrapper inherit the secret from the isolated environment. An ordinary browser cannot use the secured local pilot UI.
 
+The pilot MCP server exposes only __IMPORTANT, bootstrap_memory and search. Direct file readers (smart_search, smart_outline and smart_unfold), timeline and unrestricted observation retrieval are also blocked at call time. This closes a bypass where an authorized MCP process could otherwise read files outside the pilot project.
+
 ## Pre-write capture checks
 
 1. Capture is explicitly enabled and no stop file is present.

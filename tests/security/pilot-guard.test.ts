@@ -8,6 +8,7 @@ import type { Server as HttpServer } from 'node:http';
 import {
   assertPilotConfiguration,
   isPilotMode,
+  isPilotMcpToolAllowed,
   pilotCaptureEnabled,
   pilotClientHeaders,
   pilotHttpGate,
@@ -143,6 +144,17 @@ describe('Pilot opt-in and storage boundary', () => {
     expect(validatePilotEvents([event('fine'), event('person@example.test')]).allowed).toBe(false);
     expect(validatePilotEvents([event('A'.repeat(70000))]).allowed).toBe(false);
     expect(validatePilotEvents(Array.from({ length: 51 }, () => event())).allowed).toBe(false);
+  });
+
+  it('allows only scoped memory MCP tools in the pilot', () => {
+    for (const name of ['__IMPORTANT', 'bootstrap_memory', 'search']) {
+      expect(isPilotMcpToolAllowed(name)).toBe(true);
+    }
+    for (const name of ['smart_search', 'smart_outline', 'smart_unfold', 'get_observations', 'timeline']) {
+      expect(isPilotMcpToolAllowed(name)).toBe(false);
+    }
+    delete process.env.CLAUDE_MEM_PILOT_MODE;
+    expect(isPilotMcpToolAllowed('smart_outline')).toBe(true);
   });
 
   it('kills capture at once without restarting the worker', () => {

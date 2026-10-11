@@ -27,6 +27,11 @@ export function isPilotMode(): boolean {
   return process.env.CLAUDE_MEM_PILOT_MODE === 'true';
 }
 
+/** Local MCP code-reading tools must not bypass the pilot project boundary. */
+export function isPilotMcpToolAllowed(name: string): boolean {
+  return !isPilotMode() || ['__IMPORTANT', 'bootstrap_memory', 'search'].includes(name);
+}
+
 function canonicalPath(raw: string): string {
   if (!raw || !isAbsolute(raw)) throw new Error('Pilot paths must be absolute');
   const canonical = realpathSync(resolve(raw));

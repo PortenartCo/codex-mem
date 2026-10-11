@@ -12,7 +12,7 @@ const packageVersion = typeof __DEFAULT_PACKAGE_VERSION__ !== 'undefined' ? __DE
 
 // Import logger first
 import { logger } from '../utils/logger.js';
-import { isPilotMode, pilotClientHeaders } from '../services/security/PilotGuard.js';
+import { isPilotMode, isPilotMcpToolAllowed, pilotClientHeaders } from '../services/security/PilotGuard.js';
 
 // CRITICAL: Redirect console to stderr BEFORE other imports
 // MCP uses stdio transport where stdout is reserved for JSON-RPC protocol messages.
@@ -381,10 +381,12 @@ const server = new Server(
   }
 );
 
+// In the synthetic pilot, never expose code-reading MCP tools that could bypass
+// the HTTP project's allowlist. This is also checked at call time.
 // Register tools/list handler
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
-    tools: tools.map(tool => ({
+    tools: tools.filter(tool => isPilotMcpToolAllowed(tool.name)).map(tool => ({
       name: tool.name,
       description: tool.description,
       inputSchema: tool.inputSchema
@@ -394,6 +396,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 
 // Register tools/call handler
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  if (!isPilotMcpToolAllowed(request.params.name)) {
+    return {
+      content: [{ type: 'text' as const, text: 'MCP tool disabled in isolated pilot mode' }],
+      isError: true
+    };
+  }
   const tool = tools.find(t => t.name === request.params.name);
 
   if (!tool) {
